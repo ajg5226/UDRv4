@@ -26,13 +26,13 @@ from atlas.features.schema import (
 
 @pytest.fixture
 def price_data():
-    """Generate 300 days of price data for 3 instruments."""
+    """Generate 500 calendar days of price data for 3 instruments (~350 trading days)."""
     rng = np.random.default_rng(42)
     rows = []
-    base_date = date(2025, 3, 1)
+    base_date = date(2024, 9, 1)
     for inst_id in [1, 2, 3]:
         price = 100.0 + inst_id * 50
-        for i in range(300):
+        for i in range(500):
             d = base_date + timedelta(days=i)
             if d.weekday() >= 5:
                 continue
@@ -52,8 +52,9 @@ def price_data():
 
 
 @pytest.fixture
-def target():
-    return date(2026, 1, 15)
+def target(price_data):
+    """Use the last trading day in the dataset as target."""
+    return price_data["trade_date"].max()
 
 
 class TestMomentumGenerator:
