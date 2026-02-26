@@ -1,0 +1,307 @@
+# Feature Registry Configuration
+# Define all engineered features and their dependencies
+
+# Feature Categories
+categories:
+  returns:
+    description: "Return-based features"
+  volatility:
+    description: "Volatility and risk features"
+  momentum:
+    description: "Momentum and trend features"
+  volume:
+    description: "Volume-based features"
+  relative:
+    description: "Cross-sectional relative features"
+  macro:
+    description: "Macro-derived features"
+
+# Feature Definitions
+# Each feature specifies:
+#   - name: unique identifier
+#   - category: from categories above
+#   - dependencies: required input data or other features
+#   - lookback_days: historical data needed
+#   - parameters: configurable parameters
+
+features:
+  # ============================================
+  # RETURNS
+  # ============================================
+  daily_return:
+    category: returns
+    description: "Simple daily return"
+    dependencies:
+      - adj_close
+    lookback_days: 2
+    parameters: {}
+    
+  log_return:
+    category: returns
+    description: "Log daily return"
+    dependencies:
+      - adj_close
+    lookback_days: 2
+    parameters: {}
+
+  cumulative_return_5d:
+    category: returns
+    description: "5-day cumulative return"
+    dependencies:
+      - adj_close
+    lookback_days: 6
+    parameters:
+      window: 5
+
+  cumulative_return_21d:
+    category: returns
+    description: "21-day (1 month) cumulative return"
+    dependencies:
+      - adj_close
+    lookback_days: 22
+    parameters:
+      window: 21
+
+  cumulative_return_63d:
+    category: returns
+    description: "63-day (3 month) cumulative return"
+    dependencies:
+      - adj_close
+    lookback_days: 64
+    parameters:
+      window: 63
+
+  cumulative_return_126d:
+    category: returns
+    description: "126-day (6 month) cumulative return"
+    dependencies:
+      - adj_close
+    lookback_days: 127
+    parameters:
+      window: 126
+
+  cumulative_return_252d:
+    category: returns
+    description: "252-day (1 year) cumulative return"
+    dependencies:
+      - adj_close
+    lookback_days: 253
+    parameters:
+      window: 252
+
+  # ============================================
+  # VOLATILITY
+  # ============================================
+  realized_vol_21d:
+    category: volatility
+    description: "21-day realized volatility (annualized)"
+    dependencies:
+      - log_return
+    lookback_days: 22
+    parameters:
+      window: 21
+      annualize: true
+      trading_days: 252
+
+  realized_vol_63d:
+    category: volatility
+    description: "63-day realized volatility (annualized)"
+    dependencies:
+      - log_return
+    lookback_days: 64
+    parameters:
+      window: 63
+      annualize: true
+      trading_days: 252
+
+  vol_regime:
+    category: volatility
+    description: "Volatility regime (ratio of short to long vol)"
+    dependencies:
+      - realized_vol_21d
+      - realized_vol_63d
+    lookback_days: 64
+    parameters: {}
+
+  # ============================================
+  # MOMENTUM
+  # ============================================
+  sma_20:
+    category: momentum
+    description: "20-day simple moving average"
+    dependencies:
+      - adj_close
+    lookback_days: 20
+    parameters:
+      window: 20
+
+  sma_50:
+    category: momentum
+    description: "50-day simple moving average"
+    dependencies:
+      - adj_close
+    lookback_days: 50
+    parameters:
+      window: 50
+
+  sma_200:
+    category: momentum
+    description: "200-day simple moving average"
+    dependencies:
+      - adj_close
+    lookback_days: 200
+    parameters:
+      window: 200
+
+  price_vs_sma_20:
+    category: momentum
+    description: "Price relative to SMA(20)"
+    dependencies:
+      - adj_close
+      - sma_20
+    lookback_days: 20
+    parameters: {}
+
+  price_vs_sma_50:
+    category: momentum
+    description: "Price relative to SMA(50)"
+    dependencies:
+      - adj_close
+      - sma_50
+    lookback_days: 50
+    parameters: {}
+
+  price_vs_sma_200:
+    category: momentum
+    description: "Price relative to SMA(200)"
+    dependencies:
+      - adj_close
+      - sma_200
+    lookback_days: 200
+    parameters: {}
+
+  rsi_14:
+    category: momentum
+    description: "14-day Relative Strength Index"
+    dependencies:
+      - adj_close
+    lookback_days: 15
+    parameters:
+      window: 14
+
+  macd:
+    category: momentum
+    description: "MACD line (12-26 EMA)"
+    dependencies:
+      - adj_close
+    lookback_days: 35
+    parameters:
+      fast_period: 12
+      slow_period: 26
+
+  macd_signal:
+    category: momentum
+    description: "MACD signal line (9-period EMA of MACD)"
+    dependencies:
+      - macd
+    lookback_days: 44
+    parameters:
+      signal_period: 9
+
+  macd_histogram:
+    category: momentum
+    description: "MACD histogram (MACD - Signal)"
+    dependencies:
+      - macd
+      - macd_signal
+    lookback_days: 44
+    parameters: {}
+
+  # ============================================
+  # VOLUME
+  # ============================================
+  volume_sma_20:
+    category: volume
+    description: "20-day average volume"
+    dependencies:
+      - volume
+    lookback_days: 20
+    parameters:
+      window: 20
+
+  relative_volume:
+    category: volume
+    description: "Volume relative to 20-day average"
+    dependencies:
+      - volume
+      - volume_sma_20
+    lookback_days: 20
+    parameters: {}
+
+  # ============================================
+  # RELATIVE (Cross-sectional)
+  # ============================================
+  return_percentile_21d:
+    category: relative
+    description: "Percentile rank of 21d return across universe"
+    dependencies:
+      - cumulative_return_21d
+    lookback_days: 22
+    parameters:
+      universe: "all"  # or specific tag
+
+  vol_percentile:
+    category: relative
+    description: "Percentile rank of volatility across universe"
+    dependencies:
+      - realized_vol_21d
+    lookback_days: 22
+    parameters:
+      universe: "all"
+
+# Feature Groups (for batch calculation)
+feature_groups:
+  core:
+    description: "Core features always calculated"
+    features:
+      - daily_return
+      - log_return
+      - cumulative_return_21d
+      - realized_vol_21d
+      - sma_50
+      - sma_200
+
+  extended:
+    description: "Extended feature set"
+    features:
+      - cumulative_return_5d
+      - cumulative_return_63d
+      - cumulative_return_126d
+      - cumulative_return_252d
+      - realized_vol_63d
+      - vol_regime
+      - sma_20
+      - price_vs_sma_20
+      - price_vs_sma_50
+      - price_vs_sma_200
+      - rsi_14
+      - macd
+      - macd_signal
+      - macd_histogram
+
+  volume:
+    description: "Volume features"
+    features:
+      - volume_sma_20
+      - relative_volume
+
+  relative:
+    description: "Cross-sectional features"
+    features:
+      - return_percentile_21d
+      - vol_percentile
+
+# Default groups to calculate on nightly runs
+default_groups:
+  - core
+  - extended

@@ -1,0 +1,42 @@
+# ATLAS V1 - Requirements
+# Generated from pyproject.toml for pip users
+
+# Core
+pydantic>=2.5
+pydantic-settings>=2.1
+pyyaml>=6.0
+python-dotenv>=1.0
+
+# Data Processing
+pandas>=2.1
+numpy>=1.26
+pyarrow>=14.0
+scipy>=1.11
+
+# Database
+sqlalchemy>=2.0
+alembic>=1.13
+
+# Azure Services (optional - for cloud deployment)
+azure-identity>=1.15
+azure-storage-blob>=12.19
+azure-keyvault-secrets>=4.7
+
+# HTTP & API Clients
+httpx>=0.26
+aiohttp>=3.9
+tenacity>=8.2
+
+# Dashboard
+streamlit>=1.30
+plotly>=5.18
+
+# CLI
+typer>=0.9
+rich>=13.7
+
+# Logging
+structlog>=24.1
+
+# Scheduling
+apscheduler>=3.10

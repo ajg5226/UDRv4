@@ -1,0 +1,23 @@
+# Development environment configuration overrides
+
+pipeline:
+  parallel_providers: false  # Easier debugging
+  
+database:
+  # Use SQLite for local development
+  driver: "sqlite"
+  
+logging:
+  level: "DEBUG"
+  format: "text"  # Human-readable for development
+  app_insights:
+    enabled: false
+
+storage:
+  raw_archive:
+    enabled: false  # Skip archiving in dev
+
+dashboard:
+  auth:
+    enabled: true
+    method: "simple"

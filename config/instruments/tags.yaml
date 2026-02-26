@@ -1,0 +1,119 @@
+# Instrument Tags Configuration
+# Define portfolio and watchlist tags here
+
+tags:
+  # Core portfolio tags
+  portfolio_main:
+    description: "Main portfolio holdings"
+    color: "#2196F3"
+    
+  portfolio_alpha:
+    description: "Alpha strategy portfolio"
+    color: "#4CAF50"
+    
+  portfolio_hedge:
+    description: "Hedging positions"
+    color: "#FF9800"
+
+  # Research watchlists
+  watchlist_momentum:
+    description: "Momentum strategy candidates"
+    color: "#9C27B0"
+    
+  watchlist_value:
+    description: "Value strategy candidates"
+    color: "#00BCD4"
+    
+  watchlist_quality:
+    description: "Quality factor candidates"
+    color: "#E91E63"
+
+  # Sector tags (auto-applied based on instrument metadata)
+  sector_technology:
+    description: "Technology sector"
+    auto_apply: true
+    condition: "sector == 'Technology'"
+    
+  sector_healthcare:
+    description: "Healthcare sector"
+    auto_apply: true
+    condition: "sector == 'Healthcare'"
+    
+  sector_financials:
+    description: "Financial services sector"
+    auto_apply: true
+    condition: "sector == 'Financials'"
+    
+  sector_energy:
+    description: "Energy sector"
+    auto_apply: true
+    condition: "sector == 'Energy'"
+    
+  sector_consumer:
+    description: "Consumer sectors (discretionary + staples)"
+    auto_apply: true
+    condition: "sector in ['Consumer Discretionary', 'Consumer Staples']"
+
+  # Asset type tags
+  type_etf:
+    description: "Exchange-traded funds"
+    auto_apply: true
+    condition: "asset_type == 'etf'"
+    
+  type_equity:
+    description: "Individual equities"
+    auto_apply: true
+    condition: "asset_type == 'equity'"
+
+  # Market cap tags
+  cap_large:
+    description: "Large cap (>$10B)"
+    color: "#3F51B5"
+    
+  cap_mid:
+    description: "Mid cap ($2B-$10B)"
+    color: "#009688"
+    
+  cap_small:
+    description: "Small cap (<$2B)"
+    color: "#795548"
+
+  # Custom analysis tags
+  under_review:
+    description: "Currently under analysis"
+    color: "#FFC107"
+    
+  flagged:
+    description: "Flagged for attention"
+    color: "#F44336"
+    
+  benchmark:
+    description: "Benchmark instruments (SPY, QQQ, etc.)"
+    color: "#607D8B"
+
+# Default tags to apply to all instruments
+default_tags: []
+
+# Tag groups for dashboard filtering
+tag_groups:
+  portfolios:
+    - portfolio_main
+    - portfolio_alpha
+    - portfolio_hedge
+    
+  watchlists:
+    - watchlist_momentum
+    - watchlist_value
+    - watchlist_quality
+    
+  sectors:
+    - sector_technology
+    - sector_healthcare
+    - sector_financials
+    - sector_energy
+    - sector_consumer
+    
+  analysis:
+    - under_review
+    - flagged
+    - benchmark

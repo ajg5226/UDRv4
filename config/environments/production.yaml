@@ -1,0 +1,31 @@
+# Production environment configuration overrides
+
+pipeline:
+  parallel_providers: true
+  max_parallel_workers: 4
+  
+database:
+  driver: "mssql+pyodbc"
+  pool_size: 10
+  max_overflow: 20
+  
+logging:
+  level: "INFO"
+  format: "json"
+  app_insights:
+    enabled: true
+
+storage:
+  raw_archive:
+    enabled: true
+    retention_days: 365
+
+notifications:
+  on_failure: true
+  on_partial_success: true
+  on_anomaly: true
+
+dashboard:
+  auth:
+    enabled: true
+    method: "simple"  # Change to "azure_ad" when ready

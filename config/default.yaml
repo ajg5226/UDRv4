@@ -1,0 +1,128 @@
+# ATLAS V1 - Default Configuration
+# Override per environment in config/environments/
+
+pipeline:
+  # Schedule in cron format (UTC)
+  schedule: "0 5 * * *"  # 5 AM UTC = Midnight ET (winter) / 1 AM ET (summer)
+  timezone: "America/New_York"
+  
+  # Target completion time (local timezone)
+  completion_target_hour: 6
+  
+  # Retry configuration
+  retry:
+    max_attempts: 3
+    backoff_seconds: [60, 300, 900]  # 1 min, 5 min, 15 min
+  
+  # Execution settings
+  parallel_providers: true
+  max_parallel_workers: 4
+  batch_size_days: 30  # For backfills
+  
+  # Default run behavior
+  default_providers:
+    - tiingo
+    - fred
+
+database:
+  # Connection settings (actual connection string from Key Vault)
+  driver: "mssql+pyodbc"
+  connection_string_key: "atlas-db-connection"  # Key Vault secret name
+  
+  # Pool settings
+  pool_size: 5
+  max_overflow: 10
+  pool_timeout: 30
+  pool_recycle: 3600  # 1 hour
+  
+  # Query settings
+  query_timeout: 300  # 5 minutes
+
+storage:
+  raw_archive:
+    enabled: true
+    container: "atlas-raw"
+    retention_days: 365
+    
+  # Blob storage connection
+  connection_string_key: "atlas-storage-connection"  # Key Vault secret name
+
+providers:
+  tiingo:
+    enabled: true
+    api_key_secret: "tiingo-api-key"  # Key Vault secret name
+    base_url: "https://api.tiingo.com"
+    rate_limit_per_hour: 500
+    timeout_seconds: 60
+    
+    # Data settings
+    include_adjusted: true
+    start_date: "2005-01-01"  # Earliest date to fetch
+    
+  fred:
+    enabled: true
+    api_key_secret: "fred-api-key"  # Key Vault secret name
+    base_url: "https://api.stlouisfed.org/fred"
+    rate_limit_per_minute: 120
+    timeout_seconds: 60
+    
+    # Series configuration file
+    series_config: "config/providers/fred_series.yaml"
+
+features:
+  enabled: true
+  registry_config: "config/features/registry.yaml"
+  
+  # Calculation settings
+  parallel_calculation: true
+  max_lookback_days: 252  # 1 trading year
+
+instruments:
+  # Source for instrument universe
+  universe_source: "provider"  # "provider", "csv", or "database"
+  universe_csv: "config/instruments/universe.csv"
+  
+  # Tag configuration
+  tags_config: "config/instruments/tags.yaml"
+
+logging:
+  level: "INFO"
+  format: "json"  # "json" or "text"
+  
+  # Application Insights
+  app_insights:
+    enabled: true
+    connection_string_key: "appinsights-connection"  # Key Vault secret name
+
+notifications:
+  on_failure: true
+  on_partial_success: true
+  on_anomaly: true
+  
+  channels:
+    email:
+      enabled: true
+      recipients_secret: "atlas-alert-emails"  # Key Vault secret name (comma-separated)
+    
+    # Future: Slack, Teams, etc.
+
+dashboard:
+  # Authentication
+  auth:
+    enabled: true
+    method: "simple"  # "simple" or "azure_ad"
+    users_secret: "atlas-dashboard-users"  # Key Vault secret name (JSON)
+    session_secret: "atlas-session-secret"  # Key Vault secret name
+  
+  # Display settings
+  page_title: "ATLAS Dashboard"
+  theme: "light"
+  
+  # Data settings
+  default_lookback_days: 30
+  max_export_rows: 100000
+
+# Azure Key Vault settings
+keyvault:
+  vault_url_env: "ATLAS_KEYVAULT_URL"  # Environment variable name
+  # Uses Managed Identity for authentication
