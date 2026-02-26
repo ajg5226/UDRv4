@@ -45,7 +45,7 @@ streamlit = "^1.30"
 plotly = "^5.18"
 
 # CLI
-typer = "^0.9"
+typer = ">=0.12"
 rich = "^13.7"
 
 # Logging & Monitoring

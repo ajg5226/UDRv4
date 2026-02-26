@@ -181,7 +181,7 @@ class FactOHLCV(Base):
     split_factor: Mapped[Optional[Decimal]] = mapped_column(Numeric(18, 6))
     
     # Metadata
-    run_id: Mapped[Optional[int]] = mapped_column(BigInteger, ForeignKey("pipeline_run.run_id"))
+    run_id: Mapped[Optional[int]] = mapped_column(Integer, ForeignKey("pipeline_run.run_id"))
     created_at: Mapped[datetime] = mapped_column(
         DateTime, server_default=func.now(), nullable=False
     )
@@ -213,7 +213,7 @@ class FactMacro(Base):
     value: Mapped[Optional[Decimal]] = mapped_column(Numeric(18, 6))
     
     # Metadata
-    run_id: Mapped[Optional[int]] = mapped_column(BigInteger, ForeignKey("pipeline_run.run_id"))
+    run_id: Mapped[Optional[int]] = mapped_column(Integer, ForeignKey("pipeline_run.run_id"))
     created_at: Mapped[datetime] = mapped_column(
         DateTime, server_default=func.now(), nullable=False
     )
@@ -253,7 +253,7 @@ class FactFeature(Base):
     calc_timestamp: Mapped[Optional[datetime]] = mapped_column(DateTime)
     
     # Metadata
-    run_id: Mapped[Optional[int]] = mapped_column(BigInteger, ForeignKey("pipeline_run.run_id"))
+    run_id: Mapped[Optional[int]] = mapped_column(Integer, ForeignKey("pipeline_run.run_id"))
     created_at: Mapped[datetime] = mapped_column(
         DateTime, server_default=func.now(), nullable=False
     )
@@ -279,7 +279,7 @@ class FeatureDiagnosticRecord(Base):
 
     __tablename__ = "feature_diagnostic"
 
-    diagnostic_id: Mapped[int] = mapped_column(BigInteger, primary_key=True, autoincrement=True)
+    diagnostic_id: Mapped[int] = mapped_column(Integer, primary_key=True, autoincrement=True)
     feature_name: Mapped[str] = mapped_column(String(100), nullable=False)
     feature_version: Mapped[Optional[str]] = mapped_column(String(20))
     universe_scope: Mapped[str] = mapped_column(String(50), default="all")
@@ -297,7 +297,7 @@ class FeatureDiagnosticRecord(Base):
     regime: Mapped[Optional[str]] = mapped_column(String(20), default="all")
     
     # Metadata
-    run_id: Mapped[Optional[int]] = mapped_column(BigInteger, ForeignKey("pipeline_run.run_id"))
+    run_id: Mapped[Optional[int]] = mapped_column(Integer, ForeignKey("pipeline_run.run_id"))
     created_at: Mapped[datetime] = mapped_column(
         DateTime, server_default=func.now(), nullable=False
     )
@@ -317,7 +317,7 @@ class PipelineRun(Base):
 
     __tablename__ = "pipeline_run"
 
-    run_id: Mapped[int] = mapped_column(BigInteger, primary_key=True, autoincrement=True)
+    run_id: Mapped[int] = mapped_column(Integer, primary_key=True, autoincrement=True)
     run_type: Mapped[str] = mapped_column(String(50), nullable=False)  # nightly, backfill, manual
     run_date: Mapped[date] = mapped_column(Date, nullable=False)
     start_time: Mapped[datetime] = mapped_column(DateTime, nullable=False)

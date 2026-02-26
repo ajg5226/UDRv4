@@ -536,9 +536,38 @@ class PipelineOrchestrator:
         run_id: int,
     ) -> None:
         """Calculate features for the target date."""
-        # Feature calculation will be implemented in the feature engine
-        logger.info("Feature calculation placeholder - will be implemented")
-        pass
+        from atlas.features.engine_v2 import FeatureEngineV2, FeatureEngineConfig
+
+        logger.info("Starting feature calculation", target_date=str(target_date))
+
+        instrument_ids: Optional[list[int]] = None
+        if instruments:
+            with self._db.session() as session:
+                repo = InstrumentRepository(session)
+                instrument_ids = []
+                for ticker in instruments:
+                    inst = repo.get_by_ticker(ticker)
+                    if inst:
+                        instrument_ids.append(inst.instrument_id)
+
+        try:
+            engine = FeatureEngineV2(FeatureEngineConfig(calculate_diagnostics=False))
+            result = await engine.calculate(
+                target_date=target_date,
+                instrument_ids=instrument_ids or None,
+                run_id=run_id,
+            )
+            logger.info(
+                "Feature calculation complete",
+                features_calculated=result.features_calculated,
+                instruments_processed=result.instruments_processed,
+                records_written=result.records_written,
+            )
+            if result.errors:
+                for err in result.errors:
+                    logger.warning("Feature calculation issue", detail=err)
+        except Exception as e:
+            logger.error("Feature calculation failed", error=str(e))
     
     def _determine_status(
         self,
