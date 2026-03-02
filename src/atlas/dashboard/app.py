@@ -15,11 +15,12 @@ st.set_page_config(
     initial_sidebar_state="expanded",
 )
 
-from atlas.dashboard.auth import check_authentication, show_login
+from atlas.dashboard.auth import check_authentication, require_role, show_login
 from atlas.core.config import get_settings
 from atlas.core.logging import setup_logging
 from atlas.storage.database import get_database
 from atlas.storage.repository import (
+    FeatureRepository,
     InstrumentRepository,
     MacroRepository,
     MacroSeriesRepository,
@@ -107,19 +108,56 @@ def show_overview_page() -> None:
             col4.metric("Latest Run Date", "-")
     
     st.markdown("---")
-    
-    # Recent runs table
-    st.subheader("Recent Pipeline Runs")
-    
+
+    # Pipeline health timeline — last 7 days
+    st.subheader("Pipeline Health (Last 7 Days)")
+
     with db.session() as session:
-        run_repo = PipelineRunRepository(session)
-        # Get recent runs (simple query)
         from sqlalchemy import select
         from atlas.storage.models import PipelineRun
-        
+
+        week_ago = date.today() - timedelta(days=7)
+        stmt = (
+            select(PipelineRun)
+            .where(PipelineRun.run_date >= week_ago)
+            .order_by(PipelineRun.run_date)
+        )
+        recent_runs = list(session.scalars(stmt))
+
+    if recent_runs:
+        status_map: dict[date, str] = {}
+        for r in recent_runs:
+            prev = status_map.get(r.run_date)
+            if prev == "failed" or r.status == "failed":
+                status_map[r.run_date] = "failed"
+            elif prev == "partial" or r.status == "partial":
+                status_map[r.run_date] = "partial"
+            elif r.status == "running":
+                status_map[r.run_date] = status_map.get(r.run_date, "running")
+            else:
+                status_map[r.run_date] = status_map.get(r.run_date, "success")
+
+        _STATUS_DOT = {"success": "\U0001f7e2", "partial": "\U0001f7e1", "failed": "\U0001f534", "running": "\u26aa"}
+
+        day_cols = st.columns(7)
+        for i in range(7):
+            d = date.today() - timedelta(days=6 - i)
+            status = status_map.get(d)
+            dot = _STATUS_DOT.get(status, "\u2b1c")
+            with day_cols[i]:
+                st.markdown(f"**{d.strftime('%a')}**  \n{d.strftime('%m/%d')}  \n{dot} {status or 'none'}")
+    else:
+        st.info("No runs in the last 7 days.")
+
+    st.markdown("---")
+
+    # Recent runs table
+    st.subheader("Recent Pipeline Runs")
+
+    with db.session() as session:
         stmt = select(PipelineRun).order_by(PipelineRun.start_time.desc()).limit(10)
         runs = list(session.scalars(stmt))
-        
+
         if runs:
             runs_data = []
             for run in runs:
@@ -131,7 +169,7 @@ def show_overview_page() -> None:
                     "Started": run.start_time,
                     "Records": (run.records_inserted or 0) + (run.records_updated or 0),
                 })
-            
+
             st.dataframe(pd.DataFrame(runs_data), use_container_width=True)
         else:
             st.info("No pipeline runs found.")
@@ -318,32 +356,120 @@ def show_macro_data_page() -> None:
     
     # Display table
     st.subheader("Data Table")
-    st.dataframe(df[["fred_id", "obs_date", "value"]], use_container_width=True)
+
+    display_df = df[["fred_id", "obs_date", "value"]].sort_values(
+        ["fred_id", "obs_date"], ascending=[True, False]
+    )
+    st.dataframe(display_df, use_container_width=True)
+
+    csv = display_df.to_csv(index=False)
+    st.download_button(
+        "Download CSV",
+        csv,
+        "atlas_macro_data.csv",
+        "text/csv",
+        key="macro_csv",
+    )
 
 
 def show_features_page() -> None:
     """Show features exploration page."""
     st.title("Features")
-    
-    st.info("Feature exploration coming soon. Features are calculated as part of the pipeline.")
-    
-    # Placeholder for feature exploration
-    st.markdown("""
-    ### Available Features
-    
-    **Returns**
-    - daily_return
-    - log_return
-    - cumulative_return_5d, 21d, 63d, 126d, 252d
-    
-    **Volatility**
-    - realized_vol_21d
-    - realized_vol_63d
-    
-    **Momentum**
-    - sma_20, sma_50, sma_200
-    - rsi_14
-    """)
+
+    db = get_database()
+
+    col1, col2, col3 = st.columns(3)
+
+    with db.session() as session:
+        inst_repo = InstrumentRepository(session)
+        instruments = inst_repo.get_active()
+        ticker_options = [i.ticker for i in instruments]
+
+    with col1:
+        selected_tickers = st.multiselect(
+            "Select Instruments",
+            options=ticker_options[:100],
+            default=ticker_options[:3] if ticker_options else [],
+            max_selections=10,
+            key="feat_tickers",
+        )
+
+    with col2:
+        feature_date = st.date_input(
+            "Feature Date",
+            value=date.today() - timedelta(days=1),
+            key="feat_date",
+        )
+
+    with db.session() as session:
+        from sqlalchemy import select, distinct
+        from atlas.storage.models import FactFeature
+
+        available_names = list(session.scalars(
+            select(distinct(FactFeature.feature_name)).order_by(FactFeature.feature_name)
+        ))
+
+    with col3:
+        selected_features = st.multiselect(
+            "Select Features",
+            options=available_names,
+            default=available_names[:5] if available_names else [],
+            max_selections=20,
+            key="feat_names",
+        )
+
+    if not selected_tickers:
+        st.info("Select at least one instrument to view features.")
+        return
+
+    if not selected_features:
+        st.info("Select at least one feature." if available_names else "No features computed yet. Run the pipeline first.")
+        return
+
+    with db.session() as session:
+        inst_repo = InstrumentRepository(session)
+        feat_repo = FeatureRepository(session)
+
+        selected_instruments = inst_repo.get_by_tickers(selected_tickers)
+        instrument_ids = [i.instrument_id for i in selected_instruments]
+        ticker_map = {i.instrument_id: i.ticker for i in selected_instruments}
+
+        df = feat_repo.get_features_for_date(
+            trade_date=feature_date,
+            feature_names=selected_features,
+            instrument_ids=instrument_ids,
+        )
+
+    if df.empty:
+        st.warning(f"No feature data found for {feature_date}.")
+        return
+
+    df["ticker"] = df["instrument_id"].map(ticker_map)
+    display_cols = ["ticker"] + [c for c in df.columns if c not in ("instrument_id", "trade_date", "ticker")]
+    display_df = df[display_cols].set_index("ticker")
+
+    st.subheader("Feature Heatmap")
+    st.dataframe(
+        display_df.style.background_gradient(axis=0, cmap="RdYlGn"),
+        use_container_width=True,
+    )
+
+    st.subheader("Feature Bar Chart")
+    if len(selected_features) == 1:
+        chart_col = selected_features[0]
+        if chart_col in display_df.columns:
+            st.bar_chart(display_df[chart_col])
+    else:
+        st.bar_chart(display_df)
+
+    csv = display_df.reset_index().to_csv(index=False)
+    st.download_button(
+        "Download CSV",
+        csv,
+        f"atlas_features_{feature_date}.csv",
+        "text/csv",
+        key="feat_csv",
+    )
 
 
 def show_pipeline_runs_page() -> None:
@@ -418,40 +544,43 @@ def show_pipeline_runs_page() -> None:
         },
     )
     
-    # Run details
-    st.subheader("Run Details")
-    
-    selected_run_id = st.selectbox(
-        "Select Run ID",
-        options=[r.run_id for r in runs],
-    )
-    
-    if selected_run_id:
-        selected_run = next((r for r in runs if r.run_id == selected_run_id), None)
-        if selected_run:
-            col1, col2 = st.columns(2)
-            
-            with col1:
-                st.write("**Run Information**")
-                st.json({
-                    "run_id": selected_run.run_id,
-                    "run_type": selected_run.run_type,
-                    "run_date": str(selected_run.run_date),
-                    "status": selected_run.status,
-                    "start_time": str(selected_run.start_time),
-                    "end_time": str(selected_run.end_time) if selected_run.end_time else None,
-                    "providers_run": selected_run.providers_run,
-                    "tags_filter": selected_run.tags_filter,
-                })
-            
-            with col2:
-                st.write("**Results**")
-                st.metric("Records Inserted", selected_run.records_inserted or 0)
-                st.metric("Records Updated", selected_run.records_updated or 0)
-                
-                if selected_run.errors:
-                    st.error("Errors:")
-                    st.text(selected_run.errors)
+    # Run details — admin/engineer only
+    if require_role(["admin", "engineer"]):
+        st.subheader("Run Details")
+
+        selected_run_id = st.selectbox(
+            "Select Run ID",
+            options=[r.run_id for r in runs],
+        )
+
+        if selected_run_id:
+            selected_run = next((r for r in runs if r.run_id == selected_run_id), None)
+            if selected_run:
+                col1, col2 = st.columns(2)
+
+                with col1:
+                    st.write("**Run Information**")
+                    st.json({
+                        "run_id": selected_run.run_id,
+                        "run_type": selected_run.run_type,
+                        "run_date": str(selected_run.run_date),
+                        "status": selected_run.status,
+                        "start_time": str(selected_run.start_time),
+                        "end_time": str(selected_run.end_time) if selected_run.end_time else None,
+                        "providers_run": selected_run.providers_run,
+                        "tags_filter": selected_run.tags_filter,
+                    })
+
+                with col2:
+                    st.write("**Results**")
+                    st.metric("Records Inserted", selected_run.records_inserted or 0)
+                    st.metric("Records Updated", selected_run.records_updated or 0)
+
+                    if selected_run.errors:
+                        st.error("Errors:")
+                        st.text(selected_run.errors)
+    else:
+        st.info("Run details are available to admin and engineer roles.")
 
 
 if __name__ == "__main__":
