@@ -98,13 +98,25 @@ notifications:
   on_failure: true
   on_partial_success: true
   on_anomaly: true
-  
+
+  anomaly_detection:
+    volume_threshold_pct: 0.80   # Alert if record count < 80% of rolling average
+    lookback_runs: 10            # Number of recent runs to average
+
   channels:
     email:
       enabled: true
       recipients_secret: "atlas-alert-emails"  # Key Vault secret name (comma-separated)
-    
-    # Future: Slack, Teams, etc.
+      smtp_host: "localhost"
+      smtp_port: 587
+      smtp_use_tls: true
+      sender_secret: "atlas-alert-sender"
+
+    slack:
+      enabled: false
+      webhook_url_secret: "atlas-slack-webhook"
+      channel: "#atlas-alerts"
+      username: "ATLAS Pipeline"
 
 dashboard:
   # Authentication

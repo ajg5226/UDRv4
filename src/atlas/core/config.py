@@ -151,12 +151,33 @@ class EmailChannelConfig(BaseModel):
 
     enabled: bool = True
     recipients_secret: str = "atlas-alert-emails"
+    smtp_host: str = "localhost"
+    smtp_port: int = 587
+    smtp_use_tls: bool = True
+    sender_secret: str = "atlas-alert-sender"
+
+
+class SlackChannelConfig(BaseModel):
+    """Slack notification channel configuration."""
+
+    enabled: bool = False
+    webhook_url_secret: str = "atlas-slack-webhook"
+    channel: str = "#atlas-alerts"
+    username: str = "ATLAS Pipeline"
 
 
 class NotificationChannelsConfig(BaseModel):
     """Notification channels configuration."""
 
     email: EmailChannelConfig = Field(default_factory=EmailChannelConfig)
+    slack: SlackChannelConfig = Field(default_factory=SlackChannelConfig)
+
+
+class AnomalyDetectionConfig(BaseModel):
+    """Anomaly detection settings for record-count checks."""
+
+    volume_threshold_pct: float = 0.80
+    lookback_runs: int = 10
 
 
 class NotificationsConfig(BaseModel):
@@ -165,6 +186,7 @@ class NotificationsConfig(BaseModel):
     on_failure: bool = True
     on_partial_success: bool = True
     on_anomaly: bool = True
+    anomaly_detection: AnomalyDetectionConfig = Field(default_factory=AnomalyDetectionConfig)
     channels: NotificationChannelsConfig = Field(default_factory=NotificationChannelsConfig)
 
 

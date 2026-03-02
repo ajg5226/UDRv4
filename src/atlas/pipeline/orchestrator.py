@@ -240,7 +240,11 @@ class PipelineOrchestrator:
                 records_updated=total_updated,
                 duration_seconds=result.duration_seconds,
             )
-            
+
+            # --- Notifications ---
+            self._send_run_notifications(result)
+            self._check_volume_anomaly(result)
+
             return result
             
         except Exception as e:
@@ -257,7 +261,21 @@ class PipelineOrchestrator:
                     )
             except Exception:
                 pass
-            
+
+            # Notify on hard failure
+            try:
+                from atlas.core.notifications import NotificationService, Alert
+                svc = NotificationService(self._settings.notifications)
+                svc.notify(Alert(
+                    subject=f"Pipeline FAILED for {config.target_date}",
+                    body=str(e),
+                    severity="error",
+                    run_id=run_id,
+                    run_date=config.target_date,
+                ))
+            except Exception:
+                pass
+
             raise PipelineError(
                 "Pipeline execution failed",
                 run_id=run_id,
@@ -569,6 +587,69 @@ class PipelineOrchestrator:
         except Exception as e:
             logger.error("Feature calculation failed", error=str(e))
     
+    def _send_run_notifications(self, result: "RunResult") -> None:
+        """Send notifications based on run outcome."""
+        try:
+            from atlas.core.notifications import NotificationService
+            svc = NotificationService(self._settings.notifications)
+            svc.notify_run_result(
+                status=result.status.value,
+                run_id=result.run_id,
+                run_date=result.run_date,
+                records_inserted=result.records_inserted,
+                records_updated=result.records_updated,
+                errors=result.errors,
+                duration_seconds=result.duration_seconds,
+            )
+        except Exception as e:
+            logger.error("Failed to send run notifications", error=str(e))
+
+    def _check_volume_anomaly(self, result: "RunResult") -> None:
+        """Compare record count to recent runs and alert if below threshold."""
+        try:
+            from atlas.core.notifications import (
+                NotificationService,
+                check_volume_anomaly,
+            )
+            cfg = self._settings.notifications
+            if not cfg.on_anomaly:
+                return
+
+            total_records = result.records_inserted + result.records_updated
+
+            with self._db.session() as session:
+                from sqlalchemy import select
+                from atlas.storage.models import PipelineRun
+
+                stmt = (
+                    select(PipelineRun)
+                    .where(PipelineRun.status.in_(["success", "partial"]))
+                    .where(PipelineRun.run_id != result.run_id)
+                    .order_by(PipelineRun.start_time.desc())
+                    .limit(cfg.anomaly_detection.lookback_runs)
+                )
+                recent_runs = list(session.scalars(stmt))
+
+            if not recent_runs:
+                return
+
+            recent_counts = [
+                (r.records_inserted or 0) + (r.records_updated or 0) for r in recent_runs
+            ]
+            avg = sum(recent_counts) / len(recent_counts) if recent_counts else 0
+
+            if check_volume_anomaly(total_records, recent_counts, cfg.anomaly_detection.volume_threshold_pct):
+                svc = NotificationService(cfg)
+                svc.notify_anomaly(
+                    run_id=result.run_id,
+                    run_date=result.run_date,
+                    current_records=total_records,
+                    average_records=avg,
+                    threshold_pct=cfg.anomaly_detection.volume_threshold_pct,
+                )
+        except Exception as e:
+            logger.error("Volume anomaly check failed", error=str(e))
+
     def _determine_status(
         self,
         provider_results: dict[str, ProviderResult],
