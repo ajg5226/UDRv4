@@ -3,9 +3,9 @@
 ## Document Information
 | Field | Value |
 |-------|-------|
-| Version | 1.0.0 |
-| Last Updated | 2026-01-26 |
-| Status | Implementation Ready |
+| Version | 1.0.1 |
+| Last Updated | 2026-03-09 |
+| Status | Partially Implemented (Current-State + Target-State) |
 
 ---
 
@@ -21,6 +21,28 @@ ATLAS V1 is a **cloud-native nightly data pipeline** designed for institutional 
 - **Macro indicator categorization** (Growth, Liquidity, Risk Appetite)
 - **Streamlit dashboard** with role-based access
 - **Cloud-agnostic design** with Azure as primary deployment target
+
+---
+
+## 1.1 Current Implementation Scope (Code-Verified)
+
+The repository currently mixes implemented components and planned target-state components. Use this section as the source of truth for what is operational today.
+
+| Area | Current implementation status | Primary code paths |
+|------|-------------------------------|--------------------|
+| Pipeline orchestration | Implemented for provider execution, persistence, and run tracking | `src/atlas/pipeline/orchestrator.py` |
+| Data providers | Implemented: `tiingo`, `fred` | `src/atlas/providers/tiingo.py`, `src/atlas/providers/fred.py`, `src/atlas/providers/registry.py` |
+| Backfill | Implemented with date batching and interactive confirmation | `src/atlas/pipeline/backfill.py`, `src/atlas/cli/main.py` |
+| Persistence layer | Implemented SQLAlchemy models + repositories | `src/atlas/storage/models.py`, `src/atlas/storage/repository.py` |
+| Dashboard | Implemented overview/price/macro/runs pages, simple auth | `src/atlas/dashboard/app.py`, `src/atlas/dashboard/auth.py` |
+| Feature computation in pipeline | **Not wired** (orchestrator feature step is placeholder) | `PipelineOrchestrator._calculate_features` |
+| Feature modules | Implemented as standalone modules (schema, generators, transforms, engine v2) | `src/atlas/features/*` |
+| Alerts/notifications and raw archive workflows | Config/model scaffolding exists; end-to-end execution wiring is limited in current code | `config/default.yaml`, `src/atlas/*` |
+
+### Notes on Reading the Remainder of This Document
+
+- Sections below include target-state design material from V1 planning.
+- When a section conflicts with current code behavior, defer to the code paths listed above.
 
 ---
 

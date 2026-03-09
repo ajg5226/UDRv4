@@ -2,16 +2,32 @@
 
 ATLAS is a cloud-native data pipeline system designed for institutional investment management. It automates the collection, processing, and delivery of market data and macroeconomic indicators for quantitative analysis and decision-making.
 
+> This README includes a **current-state implementation view** (verified against source code) plus target-state context from the original V1 plan.
+
 ## Features
 
 - **Automated Nightly Pipeline** - Scheduled data collection from multiple providers
 - **Multi-Provider Architecture** - Modular support for Tiingo, FRED, and future providers
 - **Historical Backfill** - Load and process historical data for any date range
-- **Feature Engineering** - Extensible framework for derived analytics
+- **Feature Framework** - Feature schema, generators, and engine modules available for derived analytics
 - **Portfolio Tagging** - Tag instruments for portfolio tracking and subset analysis
 - **Macro Data Categorization** - FRED data organized by Growth, Liquidity, Risk Appetite
 - **Streamlit Dashboard** - Web interface for data exploration and monitoring
 - **Azure-Ready** - Infrastructure-as-code templates for Azure deployment
+
+## Current Implementation Status (Verified)
+
+| Subsystem | Current behavior |
+|---------|-------------------|
+| Pipeline orchestration (`atlas run`) | Creates tables if needed, runs configured providers, upserts OHLCV/macro data, records `pipeline_run` status |
+| Providers | `tiingo` and `fred` are implemented and initialized via the provider registry |
+| Backfill (`atlas backfill`) | Date-batch backfill with optional provider/tag filters and `--dry-run`; includes interactive confirmation |
+| Feature calculation in pipeline | Placeholder in orchestrator (`_calculate_features` is not wired to feature engines yet) |
+| Feature modules | Legacy and V2 engines, schema, transforms, diagnostics modules exist for manual/programmatic usage |
+| Dashboard | Streamlit pages for overview, price data, macro data, and pipeline run history; Features page is placeholder text |
+| Testing | `pytest` is configured, but repository currently has no committed `tests/` files |
+
+For operator-focused details, see [docs/OPERATIONS_RUNBOOK.md](docs/OPERATIONS_RUNBOOK.md).
 
 ## Quick Start
 
@@ -44,7 +60,7 @@ pip install -e .
 ```bash
 export TIINGO_API_KEY="your_tiingo_key"
 export FRED_API_KEY="your_fred_key"
-export ATLAS_DB_CONNECTION="sqlite:///atlas_dev.db"  # Or your SQL connection string
+export ATLAS_DB_CONNECTION="sqlite:///atlas_dev.db"  # Optional; falls back to local SQLite if unset
 ```
 
 2. **Or use a `.env` file**:
@@ -160,6 +176,46 @@ UDRv4/
 | `atlas dashboard` | Launch Streamlit dashboard |
 | `atlas version` | Show version |
 
+## Operational Runbook (Quick Reference)
+
+```bash
+# 1) Initialize schema
+atlas init-db
+
+# 2) Run a single-date load (defaults to previous business day)
+atlas run
+atlas run --date 2026-01-24 --providers tiingo,fred --tags portfolio_main
+
+# 3) Backfill history (interactive confirmation required unless --dry-run)
+atlas backfill --start 2025-01-01 --end 2025-03-31 --dry-run
+atlas backfill --start 2025-01-01 --end 2025-03-31
+
+# 4) Check operational status
+atlas status
+
+# 5) Launch dashboard
+atlas dashboard
+```
+
+Additional workflows (instrument tags, local validation script, automation caveats) are documented in [docs/OPERATIONS_RUNBOOK.md](docs/OPERATIONS_RUNBOOK.md).
+
+## Troubleshooting & Common Pitfalls
+
+- **`Tiingo API key not configured` / `FRED API key not configured`**  
+  Set `TIINGO_API_KEY` and `FRED_API_KEY`, or configure Key Vault and `ATLAS_KEYVAULT_URL`.
+
+- **Database connection issues in local dev**  
+  If `ATLAS_DB_CONNECTION` is unset, ATLAS falls back to `sqlite:///atlas_dev.db`. Confirm you are running from the project root if you expect the SQLite file there.
+
+- **Backfill hangs in automation/non-interactive contexts**  
+  `atlas backfill` prompts `Proceed with backfill?` via `typer.confirm`. Use `--dry-run` for non-interactive validation, or run with an interactive terminal.
+
+- **Features not visible after pipeline run**  
+  Current orchestrator feature step is a placeholder; successful `atlas run` currently covers provider ingestion and persistence, not full feature generation.
+
+- **Dashboard login confusion**  
+  Default development credentials are `admin`/`atlas123` and `analyst`/`atlas123`. For production, set `ATLAS_DASHBOARD_USERS` to a JSON object of `username -> sha256(password)`.
+
 ## Database Schema
 
 ### Dimension Tables
@@ -172,7 +228,7 @@ UDRv4/
 
 - **fact_ohlcv** - Daily OHLCV price data (raw + adjusted)
 - **fact_macro** - Macroeconomic indicator observations
-- **fact_features** - Calculated feature values
+- **fact_feature** - Calculated feature values
 
 ### Operational Tables
 
@@ -279,7 +335,7 @@ export SQL_ADMIN_PASSWORD="your_secure_password"
 |----------|-------------|----------|
 | `TIINGO_API_KEY` | Tiingo API key | Yes |
 | `FRED_API_KEY` | FRED API key | Yes |
-| `ATLAS_DB_CONNECTION` | Database connection string | Yes |
+| `ATLAS_DB_CONNECTION` | Database connection string | No (defaults to local SQLite) |
 | `ATLAS_ENV` | Environment (development/production) | No |
 | `ATLAS_KEYVAULT_URL` | Azure Key Vault URL | For Azure |
 | `ATLAS_DASHBOARD_USERS` | JSON user credentials | For production |
@@ -316,6 +372,8 @@ ATLAS organizes ~100 FRED series into three categories:
 ```bash
 pytest
 ```
+
+Note: the repository currently has no committed test files under `tests/`.
 
 ### Code Quality
 
