@@ -95,9 +95,18 @@ atlas dashboard
 
 Then open http://localhost:8501 in your browser.
 
-**Default credentials:**
-- Username: `admin` or `analyst`
-- Password: `atlas123`
+Configure dashboard users before launching in shared environments:
+
+```bash
+# Example: user admin with password atlas123
+export ATLAS_DASHBOARD_USERS='{"admin":"c55c523cd7beebd238b6ea09888a3090961e048bec6de3a24e2aa37432103f59"}'
+```
+
+For local-only testing, insecure built-in credentials can be enabled explicitly:
+
+```bash
+export ATLAS_ALLOW_INSECURE_DASHBOARD_DEFAULTS=true
+```
 
 ## Project Structure
 
@@ -283,6 +292,7 @@ export SQL_ADMIN_PASSWORD="your_secure_password"
 | `ATLAS_ENV` | Environment (development/production) | No |
 | `ATLAS_KEYVAULT_URL` | Azure Key Vault URL | For Azure |
 | `ATLAS_DASHBOARD_USERS` | JSON user credentials | For production |
+| `ATLAS_ALLOW_INSECURE_DASHBOARD_DEFAULTS` | Enables built-in weak dashboard creds (`admin`/`analyst`) | Local development only |
 
 ## FRED Data Categories
 
