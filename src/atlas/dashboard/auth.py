@@ -3,20 +3,25 @@
 import hashlib
 import json
 import os
-from typing import Optional
 
 import streamlit as st
 
-from atlas.core.config import get_settings
+from atlas.core.logging import get_logger
+
+logger = get_logger(__name__)
+
+_INSECURE_DEFAULT_USERS = ("admin", "analyst")
+_INSECURE_DEFAULT_PASSWORD = "atlas123"
+_INSECURE_DEFAULTS_ENV = "ATLAS_ALLOW_INSECURE_DASHBOARD_DEFAULTS"
 
 
 def get_users() -> dict[str, str]:
     """
     Get user credentials.
-    
-    In production, this would load from Key Vault.
-    For development, uses environment variable or defaults.
-    
+
+    In production, users must be configured via environment/secret.
+    Optional insecure defaults are available only via explicit opt-in.
+
     Returns:
         Dict of username -> password_hash
     """
@@ -24,18 +29,30 @@ def get_users() -> dict[str, str]:
     users_json = os.getenv("ATLAS_DASHBOARD_USERS")
     if users_json:
         try:
-            return json.loads(users_json)
+            users = json.loads(users_json)
+            if not isinstance(users, dict):
+                logger.error("ATLAS_DASHBOARD_USERS must be a JSON object")
+                return {}
+            return {
+                username: password_hash
+                for username, password_hash in users.items()
+                if isinstance(username, str) and isinstance(password_hash, str)
+            }
         except json.JSONDecodeError:
-            pass
-    
-    # Default users for development (password: atlas123)
-    # In production, set ATLAS_DASHBOARD_USERS or use Key Vault
-    default_password_hash = hashlib.sha256("atlas123".encode()).hexdigest()
-    
-    return {
-        "admin": default_password_hash,
-        "analyst": default_password_hash,
-    }
+            logger.error("Invalid JSON in ATLAS_DASHBOARD_USERS")
+            return {}
+
+    # Insecure fallback is opt-in only and intended for local development.
+    if os.getenv(_INSECURE_DEFAULTS_ENV, "").strip().lower() in {"1", "true", "yes", "on"}:
+        logger.warning("Using insecure default dashboard credentials")
+        default_password_hash = hashlib.sha256(_INSECURE_DEFAULT_PASSWORD.encode()).hexdigest()
+        return {username: default_password_hash for username in _INSECURE_DEFAULT_USERS}
+
+    logger.error(
+        "Dashboard users are not configured; set ATLAS_DASHBOARD_USERS or explicitly enable "
+        "ATLAS_ALLOW_INSECURE_DASHBOARD_DEFAULTS for local development only"
+    )
+    return {}
 
 
 def hash_password(password: str) -> str:
@@ -46,19 +63,19 @@ def hash_password(password: str) -> str:
 def verify_password(username: str, password: str) -> bool:
     """
     Verify a username/password combination.
-    
+
     Args:
         username: Username to verify
         password: Plain text password
-        
+
     Returns:
         True if credentials are valid
     """
     users = get_users()
-    
+
     if username not in users:
         return False
-    
+
     password_hash = hash_password(password)
     return password_hash == users[username]
 
@@ -66,7 +83,7 @@ def verify_password(username: str, password: str) -> bool:
 def check_authentication() -> bool:
     """
     Check if the current session is authenticated.
-    
+
     Returns:
         True if authenticated
     """
@@ -76,19 +93,19 @@ def check_authentication() -> bool:
 def show_login() -> None:
     """Display the login form."""
     st.title("🔐 ATLAS Login")
-    
+
     st.markdown("""
     Welcome to ATLAS Dashboard. Please log in to continue.
-    
+
     ---
     """)
-    
+
     # Login form
     with st.form("login_form"):
         username = st.text_input("Username")
         password = st.text_input("Password", type="password")
         submitted = st.form_submit_button("Login")
-        
+
         if submitted:
             if verify_password(username, password):
                 st.session_state["authenticated"] = True
@@ -97,19 +114,12 @@ def show_login() -> None:
                 st.rerun()
             else:
                 st.error("Invalid username or password")
-    
-    # Development hint
-    st.markdown("""
-    ---
-    
-    **Development Mode**
-    
-    Default credentials:
-    - Username: `admin` or `analyst`
-    - Password: `atlas123`
-    
-    *Set `ATLAS_DASHBOARD_USERS` environment variable with JSON credentials for production.*
-    """)
+
+    if os.getenv(_INSECURE_DEFAULTS_ENV, "").strip().lower() in {"1", "true", "yes", "on"}:
+        st.warning(
+            "Insecure default dashboard credentials are enabled via "
+            "`ATLAS_ALLOW_INSECURE_DASHBOARD_DEFAULTS`."
+        )
 
 
 def logout() -> None:
@@ -123,28 +133,28 @@ def logout() -> None:
 def require_role(allowed_roles: list[str]) -> bool:
     """
     Check if current user has one of the allowed roles.
-    
+
     Note: This is a simplified implementation. In production,
     use proper RBAC with Azure AD or similar.
-    
+
     Args:
         allowed_roles: List of allowed role names
-        
+
     Returns:
         True if user has required role
     """
     if not check_authentication():
         return False
-    
+
     username = st.session_state.get("username", "")
-    
+
     # Simple role mapping for development
     # In production, this would query a proper role system
     role_mapping = {
         "admin": ["admin", "engineer", "analyst"],
         "analyst": ["analyst"],
     }
-    
+
     user_roles = role_mapping.get(username, [])
-    
+
     return any(role in allowed_roles for role in user_roles)
