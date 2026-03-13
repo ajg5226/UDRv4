@@ -3,11 +3,13 @@
 import hashlib
 import json
 import os
-from typing import Optional
 
 import streamlit as st
 
 from atlas.core.config import get_settings
+from atlas.core.logging import get_logger
+
+logger = get_logger(__name__)
 
 
 def get_users() -> dict[str, str]:
@@ -20,22 +22,43 @@ def get_users() -> dict[str, str]:
     Returns:
         Dict of username -> password_hash
     """
+    settings = get_settings()
+
     # Try environment variable first (JSON format)
     users_json = os.getenv("ATLAS_DASHBOARD_USERS")
+    if not users_json:
+        # Fall back to configured secret backend
+        try:
+            from atlas.core.secrets import get_secret
+
+            users_json = get_secret(settings.dashboard.auth.users_secret)
+        except Exception as e:
+            logger.warning("Could not load dashboard users from secrets backend", error=str(e))
+
     if users_json:
         try:
-            return json.loads(users_json)
+            users = json.loads(users_json)
+            if isinstance(users, dict):
+                return users
+            logger.error("Dashboard users config is not a JSON object")
+            return {}
         except json.JSONDecodeError:
-            pass
-    
-    # Default users for development (password: atlas123)
-    # In production, set ATLAS_DASHBOARD_USERS or use Key Vault
-    default_password_hash = hashlib.sha256("atlas123".encode()).hexdigest()
-    
-    return {
-        "admin": default_password_hash,
-        "analyst": default_password_hash,
-    }
+            logger.error("Dashboard users config contains invalid JSON")
+            return {}
+
+    # Default users are development-only.
+    if settings.environment.lower() == "development":
+        default_password_hash = hashlib.sha256("atlas123".encode()).hexdigest()
+        return {
+            "admin": default_password_hash,
+            "analyst": default_password_hash,
+        }
+
+    logger.error(
+        "Dashboard users not configured; refusing insecure default credentials",
+        environment=settings.environment,
+    )
+    return {}
 
 
 def hash_password(password: str) -> str:
