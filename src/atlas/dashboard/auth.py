@@ -3,7 +3,6 @@
 import hashlib
 import json
 import os
-from typing import Optional
 
 import streamlit as st
 
@@ -28,14 +27,19 @@ def get_users() -> dict[str, str]:
         except json.JSONDecodeError:
             pass
     
-    # Default users for development (password: atlas123)
-    # In production, set ATLAS_DASHBOARD_USERS or use Key Vault
-    default_password_hash = hashlib.sha256("atlas123".encode()).hexdigest()
-    
-    return {
-        "admin": default_password_hash,
-        "analyst": default_password_hash,
-    }
+    settings = get_settings()
+    environment = settings.environment.lower()
+
+    # Default users are only allowed in local/dev-style environments.
+    # Production-like environments must explicitly configure credentials.
+    if environment in {"development", "dev", "local", "test"}:
+        default_password_hash = hashlib.sha256("atlas123".encode()).hexdigest()
+        return {
+            "admin": default_password_hash,
+            "analyst": default_password_hash,
+        }
+
+    return {}
 
 
 def hash_password(password: str) -> str:
@@ -98,18 +102,20 @@ def show_login() -> None:
             else:
                 st.error("Invalid username or password")
     
-    # Development hint
-    st.markdown("""
-    ---
-    
-    **Development Mode**
-    
-    Default credentials:
-    - Username: `admin` or `analyst`
-    - Password: `atlas123`
-    
-    *Set `ATLAS_DASHBOARD_USERS` environment variable with JSON credentials for production.*
-    """)
+    settings = get_settings()
+    if settings.environment.lower() in {"development", "dev", "local", "test"}:
+        # Development hint
+        st.markdown("""
+        ---
+        
+        **Development Mode**
+        
+        Default credentials:
+        - Username: `admin` or `analyst`
+        - Password: `atlas123`
+        
+        *Set `ATLAS_DASHBOARD_USERS` environment variable with JSON credentials for production.*
+        """)
 
 
 def logout() -> None:
