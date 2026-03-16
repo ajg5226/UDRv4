@@ -2,6 +2,20 @@
 
 ATLAS is a cloud-native data pipeline system designed for institutional investment management. It automates the collection, processing, and delivery of market data and macroeconomic indicators for quantitative analysis and decision-making.
 
+## Implementation Status (Verified from Current Code)
+
+This repository contains both production-ready ingestion paths and in-progress analytics components.
+
+- Implemented and wired in CLI/orchestrator:
+  - Tiingo OHLCV ingestion
+  - FRED macro ingestion
+  - Manual runs, backfills, run-status tracking
+  - Streamlit dashboard for overview, price, macro, and run history
+- Present but not yet wired into the pipeline run path:
+  - Feature calculation in `atlas.pipeline.orchestrator._calculate_features` (currently a placeholder)
+  - Dashboard "Features" page (currently informational placeholder)
+- Developer workflow and operations runbook: [`docs/DEVELOPER_RUNBOOK.md`](docs/DEVELOPER_RUNBOOK.md)
+
 ## Features
 
 - **Automated Nightly Pipeline** - Scheduled data collection from multiple providers
@@ -27,14 +41,17 @@ ATLAS is a cloud-native data pipeline system designed for institutional investme
 ### Installation
 
 ```bash
-# Clone the repository
-cd UDRv4
+# From repository root
+cd /path/to/UDRv4
 
 # Install dependencies with Poetry
 poetry install
+poetry run atlas version
 
 # Or with pip
-pip install -e .
+python3 -m pip install -e .
+# Optional after pip install:
+atlas version
 ```
 
 ### Configuration
@@ -132,7 +149,9 @@ UDRv4/
 │   ├── features/              # Feature engineering
 │   │   ├── base.py            # Base feature class
 │   │   ├── registry.py        # Feature registry
-│   │   └── engine.py          # Calculation engine
+│   │   ├── engine.py          # Legacy feature engine
+│   │   ├── engine_v2.py       # Enhanced feature engine (not wired by orchestrator yet)
+│   │   └── schema.py          # Unified feature schema/catalog
 │   ├── dashboard/             # Streamlit app
 │   │   ├── app.py             # Main dashboard
 │   │   └── auth.py            # Authentication
@@ -141,8 +160,9 @@ UDRv4/
 ├── infrastructure/            # Infrastructure as code
 │   └── azure/                 # Azure Bicep templates
 ├── docs/                      # Documentation
-│   └── ARCHITECTURE_DOCUMENT.md
-├── tests/                     # Test suite
+│   ├── ARCHITECTURE_DOCUMENT.md
+│   └── DEVELOPER_RUNBOOK.md
+├── scripts/                   # Local validation and utility scripts
 ├── pyproject.toml             # Project configuration
 └── README.md                  # This file
 ```
@@ -157,8 +177,11 @@ UDRv4/
 | `atlas init-db` | Initialize database schema |
 | `atlas instruments list` | List active instruments |
 | `atlas instruments add-tag` | Add tag to instrument |
+| `atlas instruments remove-tag` | Remove tag from instrument |
 | `atlas dashboard` | Launch Streamlit dashboard |
 | `atlas version` | Show version |
+
+> Note: `atlas instruments` help text includes `sync`, but `sync` is not currently implemented in `src/atlas/cli/main.py`.
 
 ## Database Schema
 
@@ -172,7 +195,7 @@ UDRv4/
 
 - **fact_ohlcv** - Daily OHLCV price data (raw + adjusted)
 - **fact_macro** - Macroeconomic indicator observations
-- **fact_features** - Calculated feature values
+- **fact_feature** - Calculated feature values
 
 ### Operational Tables
 
@@ -279,10 +302,40 @@ export SQL_ADMIN_PASSWORD="your_secure_password"
 |----------|-------------|----------|
 | `TIINGO_API_KEY` | Tiingo API key | Yes |
 | `FRED_API_KEY` | FRED API key | Yes |
-| `ATLAS_DB_CONNECTION` | Database connection string | Yes |
+| `ATLAS_DB_CONNECTION` | Database connection string | No (falls back to local SQLite) |
 | `ATLAS_ENV` | Environment (development/production) | No |
 | `ATLAS_KEYVAULT_URL` | Azure Key Vault URL | For Azure |
-| `ATLAS_DASHBOARD_USERS` | JSON user credentials | For production |
+| `ATLAS_DASHBOARD_USERS` | JSON map of username -> SHA-256 password hash | For custom dashboard users |
+
+Example for custom dashboard users:
+
+```bash
+# Generate hash for password "my_password"
+python3 - <<'PY'
+import hashlib
+print(hashlib.sha256("my_password".encode()).hexdigest())
+PY
+
+export ATLAS_DASHBOARD_USERS='{"admin":"<sha256-hash>","analyst":"<sha256-hash>"}'
+```
+
+## Common Pitfalls and Troubleshooting
+
+- **`ModuleNotFoundError` when running `atlas` commands**
+  - Install dependencies first (`poetry install` or `python3 -m pip install -e .`).
+- **Run is very slow or appears stalled**
+  - `atlas run` without `--tags` can fetch a very large Tiingo universe.
+  - Start with scoped runs (for example, `atlas run --providers fred` or `atlas run --tags portfolio_main`).
+- **`atlas backfill` stops for confirmation in scripts/automation**
+  - `atlas backfill` is interactive by default and prompts `Proceed with backfill?`.
+  - Use `--dry-run` for planning, or drive interactive confirmation explicitly in automation.
+- **Dashboard login works locally but not with custom users**
+  - `ATLAS_DASHBOARD_USERS` expects SHA-256 hashes, not plain-text passwords.
+- **Database connection errors in local development**
+  - If `ATLAS_DB_CONNECTION` is not set, ATLAS falls back to `sqlite:///atlas_dev.db`.
+  - Run `atlas init-db` before the first run to ensure schema exists.
+- **Expecting engineered features in pipeline output**
+  - Current orchestrator path logs a feature-calculation placeholder and does not persist computed features yet.
 
 ## FRED Data Categories
 
@@ -315,6 +368,12 @@ ATLAS organizes ~100 FRED series into three categories:
 
 ```bash
 pytest
+```
+
+Current state: there are no committed automated tests under `tests/` yet; use CLI smoke runs and the local validator while tests are being built out:
+
+```bash
+python3 scripts/validate_local.py
 ```
 
 ### Code Quality

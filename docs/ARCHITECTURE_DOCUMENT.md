@@ -4,8 +4,8 @@
 | Field | Value |
 |-------|-------|
 | Version | 1.0.0 |
-| Last Updated | 2026-01-26 |
-| Status | Implementation Ready |
+| Last Updated | 2026-03-16 |
+| Status | Mixed (Ingestion Ready, Feature Path In Progress) |
 
 ---
 
@@ -21,6 +21,18 @@ ATLAS V1 is a **cloud-native nightly data pipeline** designed for institutional 
 - **Macro indicator categorization** (Growth, Liquidity, Risk Appetite)
 - **Streamlit dashboard** with role-based access
 - **Cloud-agnostic design** with Azure as primary deployment target
+
+### Current Implementation Notes (As-Built)
+
+The architecture in this document includes both current-state and target-state design. For daily engineering workflows, use the developer runbook as the operational source of truth: [`docs/DEVELOPER_RUNBOOK.md`](./DEVELOPER_RUNBOOK.md).
+
+Code-verified deltas:
+
+- Active providers in the pipeline path are currently `tiingo` and `fred`.
+- Database run metadata table is `pipeline_run` (singular).
+- Feature storage table is `fact_feature` (singular).
+- Orchestrator feature step (`_calculate_features`) is currently a placeholder in `src/atlas/pipeline/orchestrator.py`.
+- Dashboard "Features" page is currently informational placeholder content.
 
 ---
 
