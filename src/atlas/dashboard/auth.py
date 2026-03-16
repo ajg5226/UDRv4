@@ -8,6 +8,7 @@ from typing import Optional
 import streamlit as st
 
 from atlas.core.config import get_settings
+from atlas.core.secrets import get_secret
 
 
 def get_users() -> dict[str, str]:
@@ -20,14 +21,29 @@ def get_users() -> dict[str, str]:
     Returns:
         Dict of username -> password_hash
     """
+    settings = get_settings()
+
     # Try environment variable first (JSON format)
     users_json = os.getenv("ATLAS_DASHBOARD_USERS")
+
+    # Fall back to configured secret source
+    if not users_json:
+        users_json = get_secret(settings.dashboard.auth.users_secret)
+
     if users_json:
         try:
-            return json.loads(users_json)
+            users = json.loads(users_json)
+            if isinstance(users, dict) and all(
+                isinstance(k, str) and isinstance(v, str) for k, v in users.items()
+            ):
+                return users
         except json.JSONDecodeError:
             pass
-    
+
+    # In non-development environments, fail closed if credentials are unavailable.
+    if settings.environment.lower() != "development":
+        return {}
+
     # Default users for development (password: atlas123)
     # In production, set ATLAS_DASHBOARD_USERS or use Key Vault
     default_password_hash = hashlib.sha256("atlas123".encode()).hexdigest()
