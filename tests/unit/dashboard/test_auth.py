@@ -2,8 +2,14 @@
 
 import hashlib
 import json
+import sys
+import types
 
 import pytest
+
+streamlit_stub = types.ModuleType("streamlit")
+streamlit_stub.session_state = {}
+sys.modules.setdefault("streamlit", streamlit_stub)
 
 from atlas.core.config import reload_settings
 from atlas.dashboard import auth
