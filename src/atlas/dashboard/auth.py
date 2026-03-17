@@ -20,22 +20,31 @@ def get_users() -> dict[str, str]:
     Returns:
         Dict of username -> password_hash
     """
+    settings = get_settings()
+    is_development = settings.environment.lower() == "development"
+
     # Try environment variable first (JSON format)
     users_json = os.getenv("ATLAS_DASHBOARD_USERS")
     if users_json:
         try:
-            return json.loads(users_json)
+            parsed_users = json.loads(users_json)
+            if isinstance(parsed_users, dict) and all(
+                isinstance(username, str) and isinstance(password_hash, str)
+                for username, password_hash in parsed_users.items()
+            ):
+                return parsed_users
         except json.JSONDecodeError:
             pass
-    
-    # Default users for development (password: atlas123)
-    # In production, set ATLAS_DASHBOARD_USERS or use Key Vault
+
+        if not is_development:
+            return {}
+
+    if not is_development:
+        return {}
+
+    # Default users for development only (password: atlas123).
     default_password_hash = hashlib.sha256("atlas123".encode()).hexdigest()
-    
-    return {
-        "admin": default_password_hash,
-        "analyst": default_password_hash,
-    }
+    return {"admin": default_password_hash, "analyst": default_password_hash}
 
 
 def hash_password(password: str) -> str:
@@ -98,18 +107,23 @@ def show_login() -> None:
             else:
                 st.error("Invalid username or password")
     
-    # Development hint
-    st.markdown("""
-    ---
-    
-    **Development Mode**
-    
-    Default credentials:
-    - Username: `admin` or `analyst`
-    - Password: `atlas123`
-    
-    *Set `ATLAS_DASHBOARD_USERS` environment variable with JSON credentials for production.*
-    """)
+    if get_settings().environment.lower() == "development":
+        # Development hint
+        st.markdown("""
+        ---
+
+        **Development Mode**
+
+        Default credentials:
+        - Username: `admin` or `analyst`
+        - Password: `atlas123`
+        """)
+    else:
+        st.markdown("""
+        ---
+
+        Configure `ATLAS_DASHBOARD_USERS` with JSON credentials to enable login.
+        """)
 
 
 def logout() -> None:
