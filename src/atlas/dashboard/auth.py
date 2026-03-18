@@ -1,13 +1,17 @@
 """Simple authentication for ATLAS dashboard."""
 
 import hashlib
+import hmac
 import json
 import os
-from typing import Optional
 
 import streamlit as st
 
 from atlas.core.config import get_settings
+from atlas.core.logging import get_logger
+from atlas.core.secrets import get_secret
+
+logger = get_logger(__name__)
 
 
 def get_users() -> dict[str, str]:
@@ -20,18 +24,38 @@ def get_users() -> dict[str, str]:
     Returns:
         Dict of username -> password_hash
     """
+    settings = get_settings()
+
     # Try environment variable first (JSON format)
     users_json = os.getenv("ATLAS_DASHBOARD_USERS")
     if users_json:
         try:
             return json.loads(users_json)
         except json.JSONDecodeError:
-            pass
-    
-    # Default users for development (password: atlas123)
-    # In production, set ATLAS_DASHBOARD_USERS or use Key Vault
+            logger.warning("Invalid ATLAS_DASHBOARD_USERS JSON; ignoring value")
+
+    # Try configured secret (e.g., Key Vault) for production-like deployments
+    users_secret_name = settings.dashboard.auth.users_secret
+    users_secret = get_secret(users_secret_name)
+    if users_secret:
+        try:
+            return json.loads(users_secret)
+        except json.JSONDecodeError:
+            logger.error(
+                "Invalid dashboard users secret JSON",
+                secret_name=users_secret_name,
+            )
+
+    # Default users are allowed only in development.
+    if settings.environment.lower() != "development":
+        logger.error(
+            "Dashboard users are not configured in non-development environment",
+            environment=settings.environment,
+        )
+        return {}
+
+    # Development fallback users (password: atlas123)
     default_password_hash = hashlib.sha256("atlas123".encode()).hexdigest()
-    
     return {
         "admin": default_password_hash,
         "analyst": default_password_hash,
@@ -58,9 +82,9 @@ def verify_password(username: str, password: str) -> bool:
     
     if username not in users:
         return False
-    
+
     password_hash = hash_password(password)
-    return password_hash == users[username]
+    return hmac.compare_digest(password_hash, users[username])
 
 
 def check_authentication() -> bool:
@@ -75,13 +99,23 @@ def check_authentication() -> bool:
 
 def show_login() -> None:
     """Display the login form."""
+    users = get_users()
+    settings = get_settings()
+
     st.title("🔐 ATLAS Login")
-    
+
     st.markdown("""
     Welcome to ATLAS Dashboard. Please log in to continue.
     
     ---
     """)
+
+    if not users:
+        st.error(
+            "Dashboard credentials are not configured. "
+            "Set ATLAS_DASHBOARD_USERS or configure the users secret."
+        )
+        return
     
     # Login form
     with st.form("login_form"):
@@ -97,19 +131,20 @@ def show_login() -> None:
                 st.rerun()
             else:
                 st.error("Invalid username or password")
-    
+
     # Development hint
-    st.markdown("""
-    ---
-    
-    **Development Mode**
-    
-    Default credentials:
-    - Username: `admin` or `analyst`
-    - Password: `atlas123`
-    
-    *Set `ATLAS_DASHBOARD_USERS` environment variable with JSON credentials for production.*
-    """)
+    if settings.environment.lower() == "development":
+        st.markdown("""
+        ---
+
+        **Development Mode**
+
+        Default credentials:
+        - Username: `admin` or `analyst`
+        - Password: `atlas123`
+
+        *Set `ATLAS_DASHBOARD_USERS` environment variable with JSON credentials for production.*
+        """)
 
 
 def logout() -> None:
