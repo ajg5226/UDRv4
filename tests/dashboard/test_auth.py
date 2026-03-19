@@ -1,6 +1,10 @@
 import hashlib
 import json
+import sys
+import types
 from types import SimpleNamespace
+
+sys.modules.setdefault("streamlit", types.SimpleNamespace(session_state={}))
 
 from atlas.dashboard import auth
 
