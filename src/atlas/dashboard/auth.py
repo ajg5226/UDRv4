@@ -10,6 +10,25 @@ import streamlit as st
 from atlas.core.config import get_settings
 
 
+def _parse_users_json(users_json: str) -> Optional[dict[str, str]]:
+    """Parse and validate JSON user credentials mapping."""
+    try:
+        parsed = json.loads(users_json)
+    except json.JSONDecodeError:
+        return None
+
+    if not isinstance(parsed, dict):
+        return None
+
+    users: dict[str, str] = {}
+    for username, password_hash in parsed.items():
+        if not isinstance(username, str) or not isinstance(password_hash, str):
+            return None
+        users[username] = password_hash
+
+    return users or None
+
+
 def get_users() -> dict[str, str]:
     """
     Get user credentials.
@@ -20,13 +39,31 @@ def get_users() -> dict[str, str]:
     Returns:
         Dict of username -> password_hash
     """
+    settings = get_settings()
+
     # Try environment variable first (JSON format)
     users_json = os.getenv("ATLAS_DASHBOARD_USERS")
     if users_json:
-        try:
-            return json.loads(users_json)
-        except json.JSONDecodeError:
-            pass
+        users = _parse_users_json(users_json)
+        if users:
+            return users
+
+    # Try configured secret source (e.g. Key Vault)
+    try:
+        from atlas.core.secrets import get_secret
+
+        secret_value = get_secret(settings.dashboard.auth.users_secret)
+        if secret_value:
+            users = _parse_users_json(secret_value)
+            if users:
+                return users
+    except Exception:
+        # Secret backends are optional and can be unavailable locally.
+        pass
+
+    # In non-development environments, fail closed if credentials are missing.
+    if settings.environment.lower() != "development":
+        return {}
     
     # Default users for development (password: atlas123)
     # In production, set ATLAS_DASHBOARD_USERS or use Key Vault
@@ -82,6 +119,11 @@ def show_login() -> None:
     
     ---
     """)
+
+    users = get_users()
+    if not users:
+        st.error("Authentication is not configured. Contact your administrator.")
+        return
     
     # Login form
     with st.form("login_form"):
@@ -99,17 +141,19 @@ def show_login() -> None:
                 st.error("Invalid username or password")
     
     # Development hint
-    st.markdown("""
-    ---
-    
-    **Development Mode**
-    
-    Default credentials:
-    - Username: `admin` or `analyst`
-    - Password: `atlas123`
-    
-    *Set `ATLAS_DASHBOARD_USERS` environment variable with JSON credentials for production.*
-    """)
+    settings = get_settings()
+    if settings.environment.lower() == "development":
+        st.markdown("""
+        ---
+        
+        **Development Mode**
+        
+        Default credentials:
+        - Username: `admin` or `analyst`
+        - Password: `atlas123`
+        
+        *Set `ATLAS_DASHBOARD_USERS` environment variable with JSON credentials for production.*
+        """)
 
 
 def logout() -> None:
