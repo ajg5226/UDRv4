@@ -10,6 +10,24 @@ import streamlit as st
 from atlas.core.config import get_settings
 
 
+def _is_development_environment() -> bool:
+    """Return True for environments where local default credentials are allowed."""
+    environment = get_settings().environment.lower()
+    return environment in {"development", "dev", "local", "test", "testing"}
+
+
+def _parse_users_json(users_json: str) -> dict[str, str]:
+    """Parse and validate ATLAS_DASHBOARD_USERS JSON payload."""
+    users = json.loads(users_json)
+    if not isinstance(users, dict):
+        raise ValueError("ATLAS_DASHBOARD_USERS must be a JSON object of username->password hash")
+    if not users:
+        raise ValueError("ATLAS_DASHBOARD_USERS cannot be empty")
+    if any(not isinstance(k, str) or not isinstance(v, str) for k, v in users.items()):
+        raise ValueError("ATLAS_DASHBOARD_USERS entries must be string username->hash pairs")
+    return users
+
+
 def get_users() -> dict[str, str]:
     """
     Get user credentials.
@@ -24,12 +42,22 @@ def get_users() -> dict[str, str]:
     users_json = os.getenv("ATLAS_DASHBOARD_USERS")
     if users_json:
         try:
-            return json.loads(users_json)
-        except json.JSONDecodeError:
-            pass
+            return _parse_users_json(users_json)
+        except ValueError:
+            if not _is_development_environment():
+                raise ValueError(
+                    "Dashboard authentication is misconfigured. "
+                    "Set ATLAS_DASHBOARD_USERS to valid JSON username->SHA256 hashes."
+                )
     
     # Default users for development (password: atlas123)
     # In production, set ATLAS_DASHBOARD_USERS or use Key Vault
+    if not _is_development_environment():
+        raise ValueError(
+            "Dashboard authentication is not configured for this environment. "
+            "Set ATLAS_DASHBOARD_USERS to valid JSON username->SHA256 hashes."
+        )
+
     default_password_hash = hashlib.sha256("atlas123".encode()).hexdigest()
     
     return {
@@ -43,7 +71,11 @@ def hash_password(password: str) -> str:
     return hashlib.sha256(password.encode()).hexdigest()
 
 
-def verify_password(username: str, password: str) -> bool:
+def verify_password(
+    username: str,
+    password: str,
+    users: Optional[dict[str, str]] = None,
+) -> bool:
     """
     Verify a username/password combination.
     
@@ -54,7 +86,7 @@ def verify_password(username: str, password: str) -> bool:
     Returns:
         True if credentials are valid
     """
-    users = get_users()
+    users = users or get_users()
     
     if username not in users:
         return False
@@ -82,6 +114,12 @@ def show_login() -> None:
     
     ---
     """)
+
+    try:
+        users = get_users()
+    except ValueError as exc:
+        st.error(str(exc))
+        return
     
     # Login form
     with st.form("login_form"):
@@ -90,7 +128,7 @@ def show_login() -> None:
         submitted = st.form_submit_button("Login")
         
         if submitted:
-            if verify_password(username, password):
+            if verify_password(username, password, users):
                 st.session_state["authenticated"] = True
                 st.session_state["username"] = username
                 st.success("Login successful!")
@@ -99,17 +137,18 @@ def show_login() -> None:
                 st.error("Invalid username or password")
     
     # Development hint
-    st.markdown("""
-    ---
-    
-    **Development Mode**
-    
-    Default credentials:
-    - Username: `admin` or `analyst`
-    - Password: `atlas123`
-    
-    *Set `ATLAS_DASHBOARD_USERS` environment variable with JSON credentials for production.*
-    """)
+    if _is_development_environment():
+        st.markdown("""
+        ---
+        
+        **Development Mode**
+        
+        Default credentials:
+        - Username: `admin` or `analyst`
+        - Password: `atlas123`
+        
+        *Set `ATLAS_DASHBOARD_USERS` environment variable with JSON credentials for production.*
+        """)
 
 
 def logout() -> None:
