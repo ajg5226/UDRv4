@@ -1,8 +1,13 @@
 """Tests for dashboard authentication behavior."""
 
+import sys
+import types
 from types import SimpleNamespace
 
 import pytest
+
+# auth.py imports streamlit at module import time. Stub it for unit tests.
+sys.modules.setdefault("streamlit", types.ModuleType("streamlit"))
 
 from atlas.dashboard import auth
 
