@@ -7,11 +7,20 @@ ATLAS is a cloud-native data pipeline system designed for institutional investme
 - **Automated Nightly Pipeline** - Scheduled data collection from multiple providers
 - **Multi-Provider Architecture** - Modular support for Tiingo, FRED, and future providers
 - **Historical Backfill** - Load and process historical data for any date range
-- **Feature Engineering** - Extensible framework for derived analytics
+- **Feature Engineering** - Extensible framework for derived analytics (integration in progress)
 - **Portfolio Tagging** - Tag instruments for portfolio tracking and subset analysis
 - **Macro Data Categorization** - FRED data organized by Growth, Liquidity, Risk Appetite
 - **Streamlit Dashboard** - Web interface for data exploration and monitoring
 - **Azure-Ready** - Infrastructure-as-code templates for Azure deployment
+
+## Current Implementation Status
+
+The codebase includes both implemented workflows and planned/partial components. The list below reflects current behavior in `src/atlas`:
+
+- `atlas run` / `atlas backfill` currently execute Tiingo and FRED ingestion, persist results, and write run metadata to `pipeline_run`.
+- Feature generation modules exist in `src/atlas/features/`, but orchestrator feature calculation is still a placeholder (`PipelineOrchestrator._calculate_features`).
+- `atlas instruments` supports `list`, `add-tag`, and `remove-tag`; `sync` is listed in help text but is not implemented.
+- Database schema setup is currently done with `atlas init-db` (`Base.metadata.create_all`), not Alembic migrations.
 
 ## Quick Start
 
@@ -27,8 +36,8 @@ ATLAS is a cloud-native data pipeline system designed for institutional investme
 ### Installation
 
 ```bash
-# Clone the repository
-cd UDRv4
+# Clone the repository and enter the repo root
+cd <repo-root>
 
 # Install dependencies with Poetry
 poetry install
@@ -102,7 +111,7 @@ Then open http://localhost:8501 in your browser.
 ## Project Structure
 
 ```
-UDRv4/
+<repo-root>/
 ├── config/                     # Configuration files
 │   ├── default.yaml           # Main configuration
 │   ├── providers/             # Provider-specific configs
@@ -130,19 +139,24 @@ UDRv4/
 │   │   ├── database.py        # Connection management
 │   │   └── repository.py      # Data access layer
 │   ├── features/              # Feature engineering
-│   │   ├── base.py            # Base feature class
-│   │   ├── registry.py        # Feature registry
-│   │   └── engine.py          # Calculation engine
+│   │   ├── base.py            # Legacy base feature class
+│   │   ├── schema.py          # V2 feature catalog/schema
+│   │   ├── generators.py      # Family-specific generators
+│   │   ├── transforms.py      # Cross-sectional transforms
+│   │   ├── engine.py          # Legacy calculation engine
+│   │   └── engine_v2.py       # V2 calculation engine
 │   ├── dashboard/             # Streamlit app
 │   │   ├── app.py             # Main dashboard
 │   │   └── auth.py            # Authentication
 │   └── cli/                   # Command-line interface
 │       └── main.py            # CLI commands
+├── scripts/                   # Local validation / utility scripts
+│   ├── validate_local.py
+│   └── backfill_5year.py
 ├── infrastructure/            # Infrastructure as code
 │   └── azure/                 # Azure Bicep templates
 ├── docs/                      # Documentation
 │   └── ARCHITECTURE_DOCUMENT.md
-├── tests/                     # Test suite
 ├── pyproject.toml             # Project configuration
 └── README.md                  # This file
 ```
@@ -151,14 +165,75 @@ UDRv4/
 
 | Command | Description |
 |---------|-------------|
-| `atlas run` | Execute pipeline for a date |
-| `atlas backfill` | Run historical backfill |
-| `atlas status` | Show pipeline status |
-| `atlas init-db` | Initialize database schema |
+| `atlas run` | Execute single-date pipeline run |
+| `atlas backfill` | Run historical backfill with batching |
+| `atlas status` | Show database health and latest run |
+| `atlas init-db` | Create schema (`--force` drops/recreates) |
 | `atlas instruments list` | List active instruments |
 | `atlas instruments add-tag` | Add tag to instrument |
-| `atlas dashboard` | Launch Streamlit dashboard |
+| `atlas instruments remove-tag` | Remove tag from instrument |
+| `atlas instruments sync` | Reserved in CLI help; not implemented yet |
+| `atlas dashboard` | Launch Streamlit dashboard (run from repo root) |
 | `atlas version` | Show version |
+
+## Operational Runbook (Local)
+
+### 1) Bootstrap a local environment
+
+```bash
+poetry install
+cp .env.example .env
+```
+
+Set at least:
+
+- `TIINGO_API_KEY`
+- `FRED_API_KEY`
+- `ATLAS_DB_CONNECTION` (optional; defaults to local SQLite if unset)
+
+### 2) Initialize schema
+
+```bash
+atlas init-db
+```
+
+Use `atlas init-db --force` only when you intentionally want to drop all tables.
+
+### 3) Validate local wiring before long runs
+
+```bash
+python scripts/validate_local.py
+```
+
+This script checks config loading, provider initialization, database schema, feature modules, and mini pipeline object creation.
+
+### 4) Run ingestion workflows
+
+```bash
+# Single date
+atlas run --date 2026-01-24 --providers tiingo,fred
+
+# Historical range
+atlas backfill --start 2026-01-01 --end 2026-01-24 --batch-size 10
+```
+
+`atlas backfill` prompts for confirmation unless `--dry-run` is used.
+
+### 5) Launch dashboard
+
+```bash
+atlas dashboard
+```
+
+The CLI launches `src/atlas/dashboard/app.py` via a relative path, so run this command from the repository root.
+
+### 6) Optional bulk historical bootstrap script
+
+```bash
+python scripts/backfill_5year.py
+```
+
+This script performs a long-form provider backfill loop and writes data incrementally; review its source before using in shared environments.
 
 ## Database Schema
 
@@ -172,7 +247,7 @@ UDRv4/
 
 - **fact_ohlcv** - Daily OHLCV price data (raw + adjusted)
 - **fact_macro** - Macroeconomic indicator observations
-- **fact_features** - Calculated feature values
+- **fact_feature** - Calculated feature values
 
 ### Operational Tables
 
@@ -213,7 +288,14 @@ class MyProvider(BaseProvider):
 
 ## Adding New Features
 
-1. Create a feature class inheriting from `BaseFeature`:
+ATLAS currently has two feature tracks:
+
+- Legacy interface (`BaseFeature` + registry in `features/registry.py`)
+- V2 schema/generator/transform workflow (`features/schema.py`, `features/generators.py`, `features/transforms.py`, `features/engine_v2.py`)
+
+`PipelineOrchestrator` does not yet invoke feature engines automatically. If you add feature definitions, validate them with `scripts/validate_local.py` and your own execution scripts.
+
+Example legacy feature class:
 
 ```python
 from atlas.features.base import BaseFeature
@@ -240,7 +322,7 @@ class MyFeature(BaseFeature):
         ...
 ```
 
-2. Register in `features/registry.py`
+2. Register in `features/registry.py` (legacy path), or in `config/features/registry.yaml` + V2 schema paths depending on your workflow.
 
 ## Azure Deployment
 
@@ -279,7 +361,7 @@ export SQL_ADMIN_PASSWORD="your_secure_password"
 |----------|-------------|----------|
 | `TIINGO_API_KEY` | Tiingo API key | Yes |
 | `FRED_API_KEY` | FRED API key | Yes |
-| `ATLAS_DB_CONNECTION` | Database connection string | Yes |
+| `ATLAS_DB_CONNECTION` | Database connection string | No (defaults to local SQLite) |
 | `ATLAS_ENV` | Environment (development/production) | No |
 | `ATLAS_KEYVAULT_URL` | Azure Key Vault URL | For Azure |
 | `ATLAS_DASHBOARD_USERS` | JSON user credentials | For production |
@@ -317,6 +399,8 @@ ATLAS organizes ~100 FRED series into three categories:
 pytest
 ```
 
+`pyproject.toml` is configured for a `tests/` testpath, but this repository snapshot does not currently include committed test files.
+
 ### Code Quality
 
 ```bash
@@ -333,6 +417,28 @@ mypy src/atlas/
 pre-commit install
 pre-commit run --all-files
 ```
+
+## Troubleshooting and Common Pitfalls
+
+### `atlas dashboard` fails with missing app path
+
+- Run the command from repo root.
+- The CLI currently calls Streamlit with `src/atlas/dashboard/app.py` as a relative path.
+
+### Provider failures due to missing keys
+
+- Ensure `TIINGO_API_KEY` and `FRED_API_KEY` are set (or available via Key Vault secret names configured in `config/default.yaml`).
+- You can quickly verify provider setup using `python scripts/validate_local.py`.
+
+### Unexpected SQLite usage
+
+- If `ATLAS_DB_CONNECTION` is not set and no Key Vault value is available, ATLAS falls back to `sqlite:///atlas_dev.db`.
+- Confirm DB target with `atlas status` and your environment configuration.
+
+### Backfill prompts in automation
+
+- `atlas backfill` asks for confirmation interactively.
+- Use `--dry-run` first to inspect scope, then run interactively for actual execution.
 
 ## Roadmap
 
