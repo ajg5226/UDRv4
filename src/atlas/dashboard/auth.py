@@ -7,7 +7,9 @@ from typing import Optional
 
 import streamlit as st
 
+from atlas.core.exceptions import AuthenticationError
 from atlas.core.config import get_settings
+from atlas.core.secrets import get_secret
 
 
 def get_users() -> dict[str, str]:
@@ -20,16 +22,37 @@ def get_users() -> dict[str, str]:
     Returns:
         Dict of username -> password_hash
     """
-    # Try environment variable first (JSON format)
+    settings = get_settings()
+
+    # Try explicit environment variable first, then configured secret backend.
     users_json = os.getenv("ATLAS_DASHBOARD_USERS")
+    if users_json is None:
+        users_json = get_secret(settings.dashboard.auth.users_secret)
+
     if users_json:
         try:
-            return json.loads(users_json)
-        except json.JSONDecodeError:
-            pass
+            users = json.loads(users_json)
+        except json.JSONDecodeError as exc:
+            raise AuthenticationError(
+                "Invalid dashboard credentials JSON in ATLAS_DASHBOARD_USERS or secrets store."
+            ) from exc
+
+        if not isinstance(users, dict):
+            raise AuthenticationError("Dashboard credentials must be a JSON object of user/password-hash pairs.")
+
+        if not all(isinstance(username, str) and isinstance(password_hash, str) for username, password_hash in users.items()):
+            raise AuthenticationError("Dashboard credentials must contain string usernames and password hashes.")
+
+        return users
     
     # Default users for development (password: atlas123)
     # In production, set ATLAS_DASHBOARD_USERS or use Key Vault
+    if settings.environment.lower() not in {"development", "dev", "local", "test"}:
+        raise AuthenticationError(
+            "Dashboard credentials are not configured. "
+            "Set ATLAS_DASHBOARD_USERS or configure the dashboard users secret."
+        )
+
     default_password_hash = hashlib.sha256("atlas123".encode()).hexdigest()
     
     return {
@@ -83,6 +106,8 @@ def show_login() -> None:
     ---
     """)
     
+    settings = get_settings()
+
     # Login form
     with st.form("login_form"):
         username = st.text_input("Username")
@@ -90,7 +115,13 @@ def show_login() -> None:
         submitted = st.form_submit_button("Login")
         
         if submitted:
-            if verify_password(username, password):
+            try:
+                authenticated = verify_password(username, password)
+            except AuthenticationError:
+                st.error("Authentication is not configured correctly. Contact your administrator.")
+                return
+
+            if authenticated:
                 st.session_state["authenticated"] = True
                 st.session_state["username"] = username
                 st.success("Login successful!")
@@ -99,6 +130,9 @@ def show_login() -> None:
                 st.error("Invalid username or password")
     
     # Development hint
+    if settings.environment.lower() not in {"development", "dev", "local", "test"}:
+        return
+
     st.markdown("""
     ---
     
