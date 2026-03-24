@@ -1,5 +1,7 @@
 """Tests for dashboard authentication credential loading."""
 
+import hashlib
+
 from atlas.core.config import get_settings
 from atlas.dashboard.auth import get_users
 
@@ -40,15 +42,15 @@ def test_get_users_fails_closed_in_production_when_missing(monkeypatch) -> None:
 
 def test_get_users_accepts_explicit_env_credentials_in_production(monkeypatch) -> None:
     """Production should authenticate only when explicit credentials are configured."""
+    expected_hash = hashlib.sha256("secret".encode()).hexdigest()
+
     monkeypatch.setenv("ATLAS_ENV", "production")
     monkeypatch.setenv(
         "ATLAS_DASHBOARD_USERS",
-        '{"ops":"2bb80d537b1da3e38bd30361aa855686bde0baef6fdb6f8f7f3f6f5f5f5f5f5f"}',
+        f'{{"ops":"{expected_hash}"}}',
     )
     _reset_cached_state()
 
     users = get_users()
 
-    assert users == {
-        "ops": "2bb80d537b1da3e38bd30361aa855686bde0baef6fdb6f8f7f3f6f5f5f5f5f5f5f"
-    }
+    assert users == {"ops": expected_hash}
