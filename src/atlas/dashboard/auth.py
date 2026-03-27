@@ -8,6 +8,9 @@ from typing import Optional
 import streamlit as st
 
 from atlas.core.config import get_settings
+from atlas.core.logging import get_logger
+
+logger = get_logger(__name__)
 
 
 def get_users() -> dict[str, str]:
@@ -20,13 +23,29 @@ def get_users() -> dict[str, str]:
     Returns:
         Dict of username -> password_hash
     """
+    settings = get_settings()
+    env = settings.environment.lower()
+    method = settings.dashboard.auth.method.lower()
+    is_production = env == "production"
+    is_simple_auth = method == "simple"
+
     # Try environment variable first (JSON format)
     users_json = os.getenv("ATLAS_DASHBOARD_USERS")
     if users_json:
         try:
-            return json.loads(users_json)
+            users = json.loads(users_json)
+            if isinstance(users, dict):
+                return users
+            logger.warning("ATLAS_DASHBOARD_USERS must be a JSON object")
         except json.JSONDecodeError:
-            pass
+            logger.warning("ATLAS_DASHBOARD_USERS contains invalid JSON")
+
+    # In production simple-auth mode, fail closed if credentials are not configured.
+    if is_production and is_simple_auth:
+        logger.error(
+            "Dashboard credentials are missing in production; refusing default credentials"
+        )
+        return {}
     
     # Default users for development (password: atlas123)
     # In production, set ATLAS_DASHBOARD_USERS or use Key Vault
