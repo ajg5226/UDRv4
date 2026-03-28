@@ -8,6 +8,7 @@ from typing import Optional
 import streamlit as st
 
 from atlas.core.config import get_settings
+from atlas.core.exceptions import ConfigurationError
 
 
 def get_users() -> dict[str, str]:
@@ -20,6 +21,9 @@ def get_users() -> dict[str, str]:
     Returns:
         Dict of username -> password_hash
     """
+    settings = get_settings()
+    environment = settings.environment.lower()
+
     # Try environment variable first (JSON format)
     users_json = os.getenv("ATLAS_DASHBOARD_USERS")
     if users_json:
@@ -27,9 +31,17 @@ def get_users() -> dict[str, str]:
             return json.loads(users_json)
         except json.JSONDecodeError:
             pass
-    
+
+    # Fail closed outside development so the dashboard never falls back
+    # to known default credentials in production-like environments.
+    if environment != "development":
+        raise ConfigurationError(
+            "ATLAS_DASHBOARD_USERS must be configured outside development",
+            details={"environment": settings.environment},
+        )
+
     # Default users for development (password: atlas123)
-    # In production, set ATLAS_DASHBOARD_USERS or use Key Vault
+    # In production, set ATLAS_DASHBOARD_USERS
     default_password_hash = hashlib.sha256("atlas123".encode()).hexdigest()
     
     return {
