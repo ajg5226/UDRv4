@@ -152,6 +152,7 @@ class PipelineOrchestrator:
             await self.initialize()
         
         config = config or RunConfig()
+        run_id: Optional[int] = None
         start_time = datetime.utcnow()
         
         # Bind logging context
@@ -247,16 +248,17 @@ class PipelineOrchestrator:
             logger.error("Pipeline run failed", error=str(e))
             
             # Try to update run record with failure
-            try:
-                with self._db.session() as session:
-                    run_repo = PipelineRunRepository(session)
-                    run_repo.complete_run(
-                        run_id=run_id,
-                        status=RunStatus.FAILED.value,
-                        errors=str(e),
-                    )
-            except Exception:
-                pass
+            if run_id is not None:
+                try:
+                    with self._db.session() as session:
+                        run_repo = PipelineRunRepository(session)
+                        run_repo.complete_run(
+                            run_id=run_id,
+                            status=RunStatus.FAILED.value,
+                            errors=str(e),
+                        )
+                except Exception:
+                    pass
             
             raise PipelineError(
                 "Pipeline execution failed",

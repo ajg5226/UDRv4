@@ -8,6 +8,31 @@ from typing import Optional
 import streamlit as st
 
 from atlas.core.config import get_settings
+from atlas.core.logging import get_logger
+from atlas.core.secrets import get_secret
+
+logger = get_logger(__name__)
+
+
+def _parse_users_json(users_json: Optional[str]) -> Optional[dict[str, str]]:
+    """Parse and validate dashboard users JSON payload."""
+    if not users_json:
+        return None
+
+    try:
+        parsed = json.loads(users_json)
+    except json.JSONDecodeError:
+        return None
+
+    if not isinstance(parsed, dict):
+        return None
+
+    users: dict[str, str] = {}
+    for username, password_hash in parsed.items():
+        if isinstance(username, str) and isinstance(password_hash, str):
+            users[username] = password_hash
+
+    return users if users else None
 
 
 def get_users() -> dict[str, str]:
@@ -20,22 +45,35 @@ def get_users() -> dict[str, str]:
     Returns:
         Dict of username -> password_hash
     """
-    # Try environment variable first (JSON format)
-    users_json = os.getenv("ATLAS_DASHBOARD_USERS")
-    if users_json:
-        try:
-            return json.loads(users_json)
-        except json.JSONDecodeError:
-            pass
-    
-    # Default users for development (password: atlas123)
-    # In production, set ATLAS_DASHBOARD_USERS or use Key Vault
-    default_password_hash = hashlib.sha256("atlas123".encode()).hexdigest()
-    
-    return {
-        "admin": default_password_hash,
-        "analyst": default_password_hash,
-    }
+    # 1) Explicit environment override (JSON format)
+    env_users = _parse_users_json(os.getenv("ATLAS_DASHBOARD_USERS"))
+    if env_users:
+        return env_users
+
+    settings = get_settings()
+
+    # 2) Key Vault secret for non-local deployments
+    secret_name = settings.dashboard.auth.users_secret
+    if secret_name:
+        keyvault_users = _parse_users_json(get_secret(secret_name))
+        if keyvault_users:
+            return keyvault_users
+
+    # 3) Development fallback only
+    environment = (settings.environment or "").lower()
+    if environment in {"development", "dev", "local", "test"}:
+        default_password_hash = hashlib.sha256("atlas123".encode()).hexdigest()
+        return {
+            "admin": default_password_hash,
+            "analyst": default_password_hash,
+        }
+
+    # Fail closed in non-development environments.
+    logger.error(
+        "Dashboard credentials not configured; refusing development fallback",
+        environment=environment,
+    )
+    return {}
 
 
 def hash_password(password: str) -> str:
@@ -98,18 +136,21 @@ def show_login() -> None:
             else:
                 st.error("Invalid username or password")
     
-    # Development hint
-    st.markdown("""
-    ---
-    
-    **Development Mode**
-    
-    Default credentials:
-    - Username: `admin` or `analyst`
-    - Password: `atlas123`
-    
-    *Set `ATLAS_DASHBOARD_USERS` environment variable with JSON credentials for production.*
-    """)
+    settings = get_settings()
+    environment = (settings.environment or "").lower()
+    if environment in {"development", "dev", "local", "test"}:
+        # Development hint
+        st.markdown("""
+        ---
+        
+        **Development Mode**
+        
+        Default credentials:
+        - Username: `admin` or `analyst`
+        - Password: `atlas123`
+        
+        *Set `ATLAS_DASHBOARD_USERS` environment variable with JSON credentials for production.*
+        """)
 
 
 def logout() -> None:
