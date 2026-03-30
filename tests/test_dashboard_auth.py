@@ -45,7 +45,7 @@ def test_get_users_honors_secret_credentials(monkeypatch) -> None:
     monkeypatch.setattr(
         auth,
         "get_secret",
-        lambda _name: '{"ops":"43f8a2ad1880e4f404877b911b5a8335f72f8500f595133fe9c000f448ca28b1"}',
+        lambda _name: '{"ops":"c55c523cd7beebd238b6ea09888a3090961e048bec6de3a24e2aa37432103f59"}',
     )
 
     users = auth.get_users()
