@@ -157,6 +157,7 @@ UDRv4/
 | `atlas init-db` | Initialize database schema |
 | `atlas instruments list` | List active instruments |
 | `atlas instruments add-tag` | Add tag to instrument |
+| `atlas instruments remove-tag` | Remove tag from instrument |
 | `atlas dashboard` | Launch Streamlit dashboard |
 | `atlas version` | Show version |
 
@@ -172,7 +173,7 @@ UDRv4/
 
 - **fact_ohlcv** - Daily OHLCV price data (raw + adjusted)
 - **fact_macro** - Macroeconomic indicator observations
-- **fact_features** - Calculated feature values
+- **fact_feature** - Calculated feature values
 
 ### Operational Tables
 
@@ -333,6 +334,102 @@ mypy src/atlas/
 pre-commit install
 pre-commit run --all-files
 ```
+
+## Implementation Notes and Operational Runbook
+
+This section reflects current implementation in `src/atlas/*` and is intended to avoid drift between architecture intent and runtime behavior.
+
+### Current implementation snapshot
+
+- Providers currently wired into the orchestrator: `tiingo`, `fred` (`src/atlas/providers/registry.py`).
+- Pipeline defaults to previous business day if `--date` is omitted (`RunConfig._get_previous_business_day`).
+- Core persistence path implemented for:
+  - Tiingo -> `fact_ohlcv`
+  - FRED -> `fact_macro`
+  - Run metadata -> `pipeline_run`
+- `atlas instruments` supports `list`, `add-tag`, and `remove-tag`.
+- Feature calculation is not yet integrated into the main orchestrator persistence path (the orchestrator method currently logs a placeholder in `src/atlas/pipeline/orchestrator.py`).
+
+### Common workflows
+
+#### 1) First-time local setup
+
+```bash
+# 1. Install dependencies
+poetry install
+
+# 2. Export required API keys
+export TIINGO_API_KEY="..."
+export FRED_API_KEY="..."
+
+# 3. Optional: force local SQLite for development
+export ATLAS_DB_CONNECTION="sqlite:///atlas_dev.db"
+
+# 4. Create schema
+atlas init-db
+```
+
+#### 2) Daily/manual run
+
+```bash
+# Previous business day
+atlas run
+
+# Explicit date and provider subset
+atlas run --date 2026-01-24 --providers tiingo,fred
+
+# Restrict to tagged instruments
+atlas run --tags portfolio_main
+```
+
+#### 3) Backfill workflow
+
+```bash
+# Preview work without executing
+atlas backfill --start 2020-01-01 --end 2020-03-31 --dry-run
+
+# Execute backfill
+atlas backfill --start 2020-01-01 --end 2020-03-31
+```
+
+Notes:
+- Backfill skips weekends by default.
+- CLI prompts for confirmation before execution unless `--dry-run` is used.
+
+#### 4) Tagging instruments for scoped runs
+
+```bash
+# Inspect active instruments
+atlas instruments list
+
+# Add/remove tags
+atlas instruments add-tag --ticker AAPL --tag portfolio_main
+atlas instruments remove-tag --ticker AAPL --tag portfolio_main
+```
+
+### Troubleshooting and pitfalls
+
+- **`atlas status` shows database disconnected**
+  - Verify `ATLAS_DB_CONNECTION`.
+  - If unset, ATLAS falls back to local SQLite (`sqlite:///atlas_dev.db`).
+  - Run `atlas init-db` after changing connection targets.
+
+- **Provider authentication errors**
+  - `Tiingo API key not configured` -> set `TIINGO_API_KEY` (or Key Vault secret `tiingo-api-key`).
+  - `FRED API key not configured` -> set `FRED_API_KEY` (or Key Vault secret `fred-api-key`).
+
+- **Runs return little/no market data**
+  - Weekend/holiday dates can produce sparse or empty market records.
+  - Use an explicit business date when validating ingestion behavior.
+
+- **Backfills are slower than expected**
+  - Tiingo and FRED ingestion currently fetch per ticker/series; wide universes increase request count.
+  - Use `--providers` and `--tags` to scope runs during debugging.
+
+- **Dashboard login confusion in local development**
+  - Default users are `admin` / `analyst`.
+  - Default password is `atlas123`.
+  - Override via `ATLAS_DASHBOARD_USERS` (JSON map of username -> password hash).
 
 ## Roadmap
 
