@@ -1,6 +1,7 @@
 """Simple authentication for ATLAS dashboard."""
 
 import hashlib
+import hmac
 import json
 import os
 from typing import Optional
@@ -8,6 +9,10 @@ from typing import Optional
 import streamlit as st
 
 from atlas.core.config import get_settings
+from atlas.core.logging import get_logger
+from atlas.core.secrets import get_secret
+
+logger = get_logger(__name__)
 
 
 def get_users() -> dict[str, str]:
@@ -20,22 +25,39 @@ def get_users() -> dict[str, str]:
     Returns:
         Dict of username -> password_hash
     """
-    # Try environment variable first (JSON format)
+    settings = get_settings()
+
+    # Try environment variable first (JSON format).
     users_json = os.getenv("ATLAS_DASHBOARD_USERS")
+
+    # Fall back to secret backend (env-var/Key Vault via SecretsManager).
+    if not users_json:
+        users_json = get_secret(settings.dashboard.auth.users_secret)
+
     if users_json:
         try:
-            return json.loads(users_json)
+            parsed = json.loads(users_json)
+            if isinstance(parsed, dict):
+                return {str(k): str(v) for k, v in parsed.items()}
         except json.JSONDecodeError:
-            pass
-    
-    # Default users for development (password: atlas123)
-    # In production, set ATLAS_DASHBOARD_USERS or use Key Vault
-    default_password_hash = hashlib.sha256("atlas123".encode()).hexdigest()
-    
-    return {
-        "admin": default_password_hash,
-        "analyst": default_password_hash,
-    }
+            logger.error("Invalid dashboard users JSON; authentication disabled")
+
+    # Default users are only allowed in local/development-style environments.
+    env = settings.environment.lower()
+    is_development = env in {"development", "dev", "local", "test", "testing"}
+    if is_development:
+        default_password_hash = hashlib.sha256("atlas123".encode()).hexdigest()
+        return {
+            "admin": default_password_hash,
+            "analyst": default_password_hash,
+        }
+
+    # Fail closed for production-like environments if auth users are missing.
+    logger.error(
+        "No dashboard users configured in production-like environment; login disabled",
+        environment=settings.environment,
+    )
+    return {}
 
 
 def hash_password(password: str) -> str:
@@ -60,7 +82,7 @@ def verify_password(username: str, password: str) -> bool:
         return False
     
     password_hash = hash_password(password)
-    return password_hash == users[username]
+    return hmac.compare_digest(password_hash, users[username])
 
 
 def check_authentication() -> bool:
@@ -83,6 +105,13 @@ def show_login() -> None:
     ---
     """)
     
+    users = get_users()
+    if not users:
+        st.error(
+            "Dashboard authentication is misconfigured: no users are configured for this environment."
+        )
+        return
+
     # Login form
     with st.form("login_form"):
         username = st.text_input("Username")
@@ -99,17 +128,19 @@ def show_login() -> None:
                 st.error("Invalid username or password")
     
     # Development hint
-    st.markdown("""
-    ---
-    
-    **Development Mode**
-    
-    Default credentials:
-    - Username: `admin` or `analyst`
-    - Password: `atlas123`
-    
-    *Set `ATLAS_DASHBOARD_USERS` environment variable with JSON credentials for production.*
-    """)
+    settings = get_settings()
+    if settings.environment.lower() in {"development", "dev", "local", "test", "testing"}:
+        st.markdown("""
+        ---
+        
+        **Development Mode**
+        
+        Default credentials:
+        - Username: `admin` or `analyst`
+        - Password: `atlas123`
+        
+        *Set `ATLAS_DASHBOARD_USERS` environment variable with JSON credentials for production.*
+        """)
 
 
 def logout() -> None:
