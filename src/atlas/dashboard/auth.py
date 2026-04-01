@@ -20,16 +20,26 @@ def get_users() -> dict[str, str]:
     Returns:
         Dict of username -> password_hash
     """
+    settings = get_settings()
+    is_development = settings.environment.lower() == "development"
+
     # Try environment variable first (JSON format)
     users_json = os.getenv("ATLAS_DASHBOARD_USERS")
     if users_json:
         try:
-            return json.loads(users_json)
+            users = json.loads(users_json)
+            if isinstance(users, dict):
+                return users
         except json.JSONDecodeError:
             pass
-    
-    # Default users for development (password: atlas123)
-    # In production, set ATLAS_DASHBOARD_USERS or use Key Vault
+
+    # Never allow hardcoded fallback users outside development.
+    # If user credentials are misconfigured in non-dev environments,
+    # fail closed by returning an empty credential set.
+    if not is_development:
+        return {}
+
+    # Default users for development only (password: atlas123).
     default_password_hash = hashlib.sha256("atlas123".encode()).hexdigest()
     
     return {
