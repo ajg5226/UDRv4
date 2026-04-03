@@ -20,16 +20,27 @@ def get_users() -> dict[str, str]:
     Returns:
         Dict of username -> password_hash
     """
+    settings = get_settings()
+
     # Try environment variable first (JSON format)
     users_json = os.getenv("ATLAS_DASHBOARD_USERS")
     if users_json:
         try:
-            return json.loads(users_json)
+            users = json.loads(users_json)
+            if not isinstance(users, dict) or not users:
+                raise ValueError("ATLAS_DASHBOARD_USERS must be a non-empty JSON object")
+            return users
         except json.JSONDecodeError:
-            pass
+            raise ValueError("ATLAS_DASHBOARD_USERS is not valid JSON")
     
-    # Default users for development (password: atlas123)
-    # In production, set ATLAS_DASHBOARD_USERS or use Key Vault
+    # Default users are only allowed in development mode.
+    if settings.environment.lower() != "development":
+        raise ValueError(
+            "ATLAS_DASHBOARD_USERS must be configured when dashboard auth is enabled "
+            "outside development"
+        )
+
+    # Development fallback users (password: atlas123)
     default_password_hash = hashlib.sha256("atlas123".encode()).hexdigest()
     
     return {
@@ -54,13 +65,26 @@ def verify_password(username: str, password: str) -> bool:
     Returns:
         True if credentials are valid
     """
-    users = get_users()
+    try:
+        users = get_users()
+    except ValueError:
+        # Fail closed on auth misconfiguration.
+        return False
     
     if username not in users:
         return False
     
     password_hash = hash_password(password)
     return password_hash == users[username]
+
+
+def get_auth_configuration_error() -> Optional[str]:
+    """Return auth configuration error text if dashboard auth is misconfigured."""
+    try:
+        get_users()
+    except ValueError as exc:
+        return str(exc)
+    return None
 
 
 def check_authentication() -> bool:
@@ -82,6 +106,12 @@ def show_login() -> None:
     
     ---
     """)
+
+    config_error = get_auth_configuration_error()
+    if config_error:
+        st.error("Dashboard authentication is misconfigured. Access is disabled.")
+        st.code(config_error)
+        return
     
     # Login form
     with st.form("login_form"):
@@ -98,18 +128,20 @@ def show_login() -> None:
             else:
                 st.error("Invalid username or password")
     
-    # Development hint
-    st.markdown("""
-    ---
-    
-    **Development Mode**
-    
-    Default credentials:
-    - Username: `admin` or `analyst`
-    - Password: `atlas123`
-    
-    *Set `ATLAS_DASHBOARD_USERS` environment variable with JSON credentials for production.*
-    """)
+    settings = get_settings()
+    if settings.environment.lower() == "development":
+        # Development hint
+        st.markdown("""
+        ---
+        
+        **Development Mode**
+        
+        Default credentials:
+        - Username: `admin` or `analyst`
+        - Password: `atlas123`
+        
+        *Set `ATLAS_DASHBOARD_USERS` environment variable with JSON credentials for production.*
+        """)
 
 
 def logout() -> None:
