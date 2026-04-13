@@ -1,5 +1,23 @@
 import json
+import sys
+import types
 from types import SimpleNamespace
+
+if "streamlit" not in sys.modules:
+    streamlit_stub = types.ModuleType("streamlit")
+    streamlit_stub.session_state = {}
+    sys.modules["streamlit"] = streamlit_stub
+
+if "atlas.core.config" not in sys.modules:
+    core_stub = types.ModuleType("atlas.core")
+    config_stub = types.ModuleType("atlas.core.config")
+    config_stub.get_settings = lambda: SimpleNamespace(
+        environment="development",
+        dashboard=SimpleNamespace(auth=SimpleNamespace(users_secret="atlas-dashboard-users")),
+    )
+    core_stub.config = config_stub
+    sys.modules["atlas.core"] = core_stub
+    sys.modules["atlas.core.config"] = config_stub
 
 from atlas.dashboard import auth
 
