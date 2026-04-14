@@ -3,7 +3,6 @@
 import hashlib
 import json
 import os
-from typing import Optional
 
 import streamlit as st
 
@@ -24,18 +23,29 @@ def get_users() -> dict[str, str]:
     users_json = os.getenv("ATLAS_DASHBOARD_USERS")
     if users_json:
         try:
-            return json.loads(users_json)
+            users = json.loads(users_json)
+            if isinstance(users, dict):
+                return {
+                    str(username): str(password_hash)
+                    for username, password_hash in users.items()
+                    if username and password_hash
+                }
         except json.JSONDecodeError:
-            pass
+            # Fail closed on malformed credentials instead of silently
+            # falling back to known default credentials.
+            return {}
     
-    # Default users for development (password: atlas123)
-    # In production, set ATLAS_DASHBOARD_USERS or use Key Vault
-    default_password_hash = hashlib.sha256("atlas123".encode()).hexdigest()
-    
-    return {
-        "admin": default_password_hash,
-        "analyst": default_password_hash,
-    }
+    settings = get_settings()
+    if settings.environment.lower() in {"development", "dev", "local", "test"}:
+        # Default users for development only (password: atlas123)
+        default_password_hash = hashlib.sha256("atlas123".encode()).hexdigest()
+        return {
+            "admin": default_password_hash,
+            "analyst": default_password_hash,
+        }
+
+    # Fail closed in non-development environments if no credentials are configured.
+    return {}
 
 
 def hash_password(password: str) -> str:
@@ -76,6 +86,14 @@ def check_authentication() -> bool:
 def show_login() -> None:
     """Display the login form."""
     st.title("🔐 ATLAS Login")
+    users = get_users()
+
+    if not users:
+        st.error(
+            "Dashboard authentication is not configured. "
+            "Set ATLAS_DASHBOARD_USERS to a JSON map of username -> password hash."
+        )
+        return
     
     st.markdown("""
     Welcome to ATLAS Dashboard. Please log in to continue.
@@ -90,7 +108,7 @@ def show_login() -> None:
         submitted = st.form_submit_button("Login")
         
         if submitted:
-            if verify_password(username, password):
+            if hash_password(password) == users.get(username):
                 st.session_state["authenticated"] = True
                 st.session_state["username"] = username
                 st.success("Login successful!")
@@ -99,17 +117,18 @@ def show_login() -> None:
                 st.error("Invalid username or password")
     
     # Development hint
-    st.markdown("""
-    ---
-    
-    **Development Mode**
-    
-    Default credentials:
-    - Username: `admin` or `analyst`
-    - Password: `atlas123`
-    
-    *Set `ATLAS_DASHBOARD_USERS` environment variable with JSON credentials for production.*
-    """)
+    if get_settings().environment.lower() in {"development", "dev", "local", "test"}:
+        st.markdown("""
+        ---
+        
+        **Development Mode**
+        
+        Default credentials:
+        - Username: `admin` or `analyst`
+        - Password: `atlas123`
+        
+        *Set `ATLAS_DASHBOARD_USERS` environment variable with JSON credentials for production.*
+        """)
 
 
 def logout() -> None:
