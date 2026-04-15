@@ -8,6 +8,9 @@ from typing import Optional
 import streamlit as st
 
 from atlas.core.config import get_settings
+from atlas.core.logging import get_logger
+
+logger = get_logger(__name__)
 
 
 def get_users() -> dict[str, str]:
@@ -20,22 +23,46 @@ def get_users() -> dict[str, str]:
     Returns:
         Dict of username -> password_hash
     """
+    settings = get_settings()
+
     # Try environment variable first (JSON format)
     users_json = os.getenv("ATLAS_DASHBOARD_USERS")
     if users_json:
         try:
-            return json.loads(users_json)
+            users = json.loads(users_json)
+            if isinstance(users, dict):
+                return users
+            logger.warning("ATLAS_DASHBOARD_USERS is not a JSON object")
         except json.JSONDecodeError:
-            pass
-    
-    # Default users for development (password: atlas123)
-    # In production, set ATLAS_DASHBOARD_USERS or use Key Vault
-    default_password_hash = hashlib.sha256("atlas123".encode()).hexdigest()
-    
-    return {
-        "admin": default_password_hash,
-        "analyst": default_password_hash,
-    }
+            logger.warning("ATLAS_DASHBOARD_USERS is not valid JSON")
+
+    # Fall back to secrets manager
+    try:
+        from atlas.core.secrets import get_secret
+
+        secret_users = get_secret(settings.dashboard.auth.users_secret)
+        if secret_users:
+            users = json.loads(secret_users)
+            if isinstance(users, dict):
+                return users
+            logger.warning("Dashboard users secret is not a JSON object")
+    except Exception as e:
+        logger.warning("Could not load dashboard users from secrets manager", error=str(e))
+
+    # Only allow hardcoded defaults in non-production environments.
+    if settings.environment.lower() in {"development", "dev", "local", "test"}:
+        default_password_hash = hashlib.sha256("atlas123".encode()).hexdigest()
+        return {
+            "admin": default_password_hash,
+            "analyst": default_password_hash,
+        }
+
+    # Fail closed when auth is enabled but no credentials are configured.
+    logger.error(
+        "Dashboard auth is enabled but no users are configured; login disabled",
+        environment=settings.environment,
+    )
+    return {}
 
 
 def hash_password(password: str) -> str:
@@ -76,6 +103,14 @@ def check_authentication() -> bool:
 def show_login() -> None:
     """Display the login form."""
     st.title("🔐 ATLAS Login")
+    users = get_users()
+
+    if not users:
+        st.error(
+            "Authentication is not configured. "
+            "Set ATLAS_DASHBOARD_USERS or configure dashboard users secret."
+        )
+        return
     
     st.markdown("""
     Welcome to ATLAS Dashboard. Please log in to continue.
@@ -90,7 +125,7 @@ def show_login() -> None:
         submitted = st.form_submit_button("Login")
         
         if submitted:
-            if verify_password(username, password):
+            if hash_password(password) == users.get(username):
                 st.session_state["authenticated"] = True
                 st.session_state["username"] = username
                 st.success("Login successful!")
