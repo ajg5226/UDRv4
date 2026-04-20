@@ -3,9 +3,9 @@
 ## Document Information
 | Field | Value |
 |-------|-------|
-| Version | 1.0.0 |
-| Last Updated | 2026-01-26 |
-| Status | Implementation Ready |
+| Version | 1.1.0 |
+| Last Updated | 2026-04-20 |
+| Status | Implementation Baseline (Code-Verified) |
 
 ---
 
@@ -21,6 +21,14 @@ ATLAS V1 is a **cloud-native nightly data pipeline** designed for institutional 
 - **Macro indicator categorization** (Growth, Liquidity, Risk Appetite)
 - **Streamlit dashboard** with role-based access
 - **Cloud-agnostic design** with Azure as primary deployment target
+
+### Implementation Boundary (Current Code)
+
+- Runtime execution in this repository is CLI-driven (`atlas run`, `atlas backfill`) from `src/atlas/cli/main.py`.
+- Pipeline schedule configuration exists in `config/default.yaml`, but timer/cron wiring is external to this repository.
+- Data persistence in orchestrator currently handles provider names `tiingo` and `fred`.
+- Feature calculation in orchestrator is currently a placeholder; `FeatureEngineV2` exists but is not wired into `PipelineOrchestrator.run`.
+- Dashboard authentication is currently simple username/password hash comparison using `ATLAS_DASHBOARD_USERS`.
 
 ---
 
@@ -65,14 +73,14 @@ ATLAS V1 is a **cloud-native nightly data pipeline** designed for institutional 
 │  ┌─────────────────────────────────────────────────────────────────────┐   │
 │  │                     Azure SQL Database                               │   │
 │  │  ┌──────────┐ ┌──────────┐ ┌──────────┐ ┌──────────┐ ┌──────────┐  │   │
-│  │  │dim_source│ │dim_instr │ │fact_ohlcv│ │fact_macro│ │fact_feat │  │   │
+│  │  │dim_source│ │dim_instr │ │fact_ohlcv│ │fact_macro│ │fact_feature│ │   │
 │  │  └──────────┘ └──────────┘ └──────────┘ └──────────┘ └──────────┘  │   │
 │  │  ┌──────────────────────────────────────────────────────────────┐  │   │
-│  │  │                    pipeline_runs                              │  │   │
+│  │  │                     pipeline_run                              │  │   │
 │  │  └──────────────────────────────────────────────────────────────┘  │   │
 │  └─────────────────────────────────────────────────────────────────────┘   │
 │  ┌─────────────────────────────────────────────────────────────────────┐   │
-│  │              Azure Blob Storage (Raw Archive)                        │   │
+│  │        Azure Blob Storage (Raw Archive - Planned in Runtime)         │   │
 │  └─────────────────────────────────────────────────────────────────────┘   │
 └─────────────────────────────────────────────────────────────────────────────┘
                                     │
@@ -92,10 +100,10 @@ ATLAS V1 is a **cloud-native nightly data pipeline** designed for institutional 
 ┌─────────────────────────────────────────────────────────────────────────────┐
 │                        ORCHESTRATION LAYER                                  │
 │  ┌─────────────────────────────────────────────────────────────────────┐   │
-│  │                    Azure Functions (Timer Trigger)                   │   │
+│  │             CLI + External Scheduler Invocation Path                  │   │
 │  │  ┌──────────────────────────────────────────────────────────────┐  │   │
 │  │  │  Pipeline Orchestrator                                        │  │   │
-│  │  │  - Nightly scheduled run (configurable)                       │  │   │
+│  │  │  - Scheduled runs (when invoked by deployment scheduler)      │  │   │
 │  │  │  - Manual trigger support                                     │  │   │
 │  │  │  - Backfill mode                                              │  │   │
 │  │  └──────────────────────────────────────────────────────────────┘  │   │
@@ -114,18 +122,18 @@ ATLAS V1 is a **cloud-native nightly data pipeline** designed for institutional 
 
 ### 2.2 Component Responsibilities
 
-| Component | Responsibility | Azure Service |
-|-----------|---------------|---------------|
-| **Provider Registry** | Manages data source adapters | Azure Functions |
-| **Validation Engine** | Schema & quality checks | Azure Functions |
-| **Transformation Engine** | Data normalization | Azure Functions |
-| **Feature Engine** | Derived metric calculation | Azure Functions |
-| **Primary Storage** | Relational data store | Azure SQL Database |
-| **Raw Archive** | Source data preservation | Azure Blob Storage |
-| **Dashboard** | User interface | Azure Container Apps |
-| **Orchestrator** | Pipeline scheduling | Azure Functions Timer |
-| **Secrets Management** | Credentials storage | Azure Key Vault |
-| **Monitoring** | Logs and metrics | Application Insights |
+| Component | Responsibility | Current Status |
+|-----------|---------------|----------------|
+| **Provider Registry** | Manages data source adapters | Implemented (`src/atlas/providers/registry.py`) |
+| **Validation Engine** | Provider-level schema/data checks | Implemented in provider `validate()` methods |
+| **Transformation Engine** | Normalize provider outputs for persistence | Implemented in orchestrator persistence mapping |
+| **Feature Engine** | Derived metric calculation | `FeatureEngineV2` implemented, not wired to orchestrator runtime |
+| **Primary Storage** | Relational data store | Implemented via SQLAlchemy models/repositories |
+| **Raw Archive** | Source response archival | Configured but not implemented in current pipeline flow |
+| **Dashboard** | User interface | Implemented via Streamlit app |
+| **Orchestrator** | Single-date and backfill execution | Implemented (`PipelineOrchestrator`, `BackfillManager`) |
+| **Secrets Management** | Credentials and connection retrieval | Environment + Key Vault fallback implemented |
+| **Monitoring** | Structured logs and run records | Implemented locally (logging + `pipeline_run`) |
 
 ---
 
@@ -153,7 +161,7 @@ ATLAS V1 is a **cloud-native nightly data pipeline** designed for institutional 
          │    │                    │                    │    │
          ▼    ▼                    ▼                    ▼    ▼
 ┌─────────────────┐       ┌─────────────────┐       ┌─────────────────┐
-│   fact_ohlcv    │       │  fact_features  │       │   fact_macro    │
+│   fact_ohlcv    │       │  fact_feature   │       │   fact_macro    │
 ├─────────────────┤       ├─────────────────┤       ├─────────────────┤
 │ PK,FK instrument│       │ PK,FK instrument│       │ PK,FK series_id │
 │ PK    trade_date│       │ PK    trade_date│       │ PK    obs_date  │
@@ -173,7 +181,7 @@ ATLAS V1 is a **cloud-native nightly data pipeline** designed for institutional 
 │    run_id       │       └─────────────────┘
 │    created_at   │
 └─────────────────┘       ┌─────────────────┐
-                          │  pipeline_runs  │
+                          │   pipeline_run  │
                           ├─────────────────┤
                           │ PK run_id       │
                           │    run_type     │
@@ -182,7 +190,8 @@ ATLAS V1 is a **cloud-native nightly data pipeline** designed for institutional 
                           │    end_time     │
                           │    status       │
                           │    providers_run│
-                          │    records_proc │
+                          │ records_inserted│
+                          │ records_updated │
                           │    errors       │
                           │    tags_filter  │
                           │    created_at   │
@@ -276,7 +285,7 @@ Daily OHLCV price data with adjustments.
 | adj_volume | BIGINT | | Adjusted volume |
 | dividend | DECIMAL(18,6) | | Dividend amount |
 | split_factor | DECIMAL(18,6) | | Split ratio |
-| run_id | BIGINT | FK | Reference to pipeline_runs |
+| run_id | BIGINT | FK | Reference to pipeline_run |
 | created_at | DATETIME2 | DEFAULT GETUTCDATE() | Record creation time |
 
 **Index:** (trade_date), (instrument_id, trade_date DESC)
@@ -290,12 +299,12 @@ Macroeconomic indicator observations.
 | obs_date | DATE | PK | Observation date |
 | source_id | INT | FK | Reference to dim_source |
 | value | DECIMAL(18,6) | | Observation value |
-| run_id | BIGINT | FK | Reference to pipeline_runs |
+| run_id | BIGINT | FK | Reference to pipeline_run |
 | created_at | DATETIME2 | DEFAULT GETUTCDATE() | Record creation time |
 
 **Index:** (obs_date), (series_id, obs_date DESC)
 
-#### fact_features
+#### fact_feature
 Engineered features derived from price/macro data.
 
 | Column | Type | Constraints | Description |
@@ -305,12 +314,12 @@ Engineered features derived from price/macro data.
 | feature_name | VARCHAR(100) | PK | Feature identifier |
 | source_id | INT | FK | Reference to dim_source (origin data) |
 | value | DECIMAL(18,6) | | Calculated feature value |
-| run_id | BIGINT | FK | Reference to pipeline_runs |
+| run_id | BIGINT | FK | Reference to pipeline_run |
 | created_at | DATETIME2 | DEFAULT GETUTCDATE() | Record creation time |
 
 **Index:** (trade_date), (feature_name, trade_date), (instrument_id, feature_name, trade_date DESC)
 
-#### pipeline_runs
+#### pipeline_run
 Operational metadata for each pipeline execution.
 
 | Column | Type | Constraints | Description |
@@ -470,7 +479,7 @@ class BaseFeature(ABC):
         pass
 ```
 
-### 5.2 Feature Registry
+### 5.2 Feature Registry (Legacy V1 Interface)
 
 ```python
 class FeatureRegistry:
@@ -479,26 +488,47 @@ class FeatureRegistry:
     def register(self, feature: BaseFeature) -> None:
         """Register a feature."""
         
-    def get_calculation_order(self) -> List[BaseFeature]:
-        """Return features in dependency-resolved order."""
-        
-    def calculate_all(
+    def get_calculation_order(
         self,
-        data: pd.DataFrame,
-        date: datetime.date
-    ) -> pd.DataFrame:
-        """Calculate all features for a date."""
+        feature_names: Optional[List[str]] = None
+    ) -> List[BaseFeature]:
+        """Return features in dependency-resolved order."""
+
+    def get_required_lookback(
+        self,
+        feature_names: Optional[List[str]] = None
+    ) -> int:
+        """Get max historical lookback needed for selected features."""
+
+    def get_required_columns(
+        self,
+        feature_names: Optional[List[str]] = None
+    ) -> Set[str]:
+        """Get required raw input columns (excluding feature dependencies)."""
 ```
 
-### 5.3 Feature Categories (Extensible)
+### 5.3 Feature Engine V2 (Implemented, Not Yet Wired to Orchestrator)
+
+`src/atlas/features/engine_v2.py` provides a production-style feature engine that:
+
+- selects features by family/priority from schema,
+- loads OHLCV history (plus benchmark/factor data),
+- computes raw features and panel transforms,
+- upserts `fact_feature` records with metadata.
+
+Current runtime note:
+
+- `PipelineOrchestrator._calculate_features()` is still a placeholder; V2 exists but is not invoked in the default `atlas run` path.
+
+### 5.4 Feature Categories (Schema-Driven)
 
 | Category | Example Features |
 |----------|-----------------|
 | **Returns** | daily_return, cumulative_return_5d, cumulative_return_21d |
-| **Volatility** | realized_vol_21d, realized_vol_63d, vol_ratio |
+| **Volatility** | realized_vol_21d, realized_vol_63d, vol_regime |
 | **Momentum** | rsi_14, macd, price_vs_sma_50, price_vs_sma_200 |
-| **Volume** | volume_sma_20, relative_volume, obv |
-| **Cross-sectional** | sector_relative_return, percentile_rank |
+| **Volume** | volume_sma_20, relative_volume |
+| **Cross-sectional** | return_percentile_21d, vol_percentile |
 
 ---
 
@@ -508,55 +538,33 @@ class FeatureRegistry:
 
 | Mode | Trigger | Description |
 |------|---------|-------------|
-| **Nightly** | Timer (cron) | Standard daily run for previous trading day |
-| **Backfill** | Manual/API | Process historical date range |
-| **Manual** | Manual/API | Ad-hoc single date run |
+| **Manual** | CLI (`atlas run`) | Ad-hoc single-date run |
+| **Backfill** | CLI (`atlas backfill`) | Historical range processing in batches |
+| **Scheduled** | External scheduler (deployment concern) | Uses same orchestrator path once invoked |
 
-### 6.2 Pipeline Flow
+### 6.2 Pipeline Flow (Current Implementation)
 
-```
-┌─────────────────────────────────────────────────────────────────┐
-│                     Pipeline Orchestrator                        │
-├─────────────────────────────────────────────────────────────────┤
-│                                                                  │
-│  1. Initialize Run                                               │
-│     └─► Create pipeline_runs record (status: running)           │
-│                                                                  │
-│  2. Load Configuration                                           │
-│     └─► Read active providers, instruments, tags filter          │
-│                                                                  │
-│  3. Execute Providers (parallel where possible)                  │
-│     ┌─► For each active provider:                                │
-│     │   ├─► Fetch data for target date                          │
-│     │   ├─► Validate response                                    │
-│     │   ├─► Archive raw data (Blob Storage)                      │
-│     │   └─► Return ProviderResult                                │
-│     └─► Collect all results, handle partial failures             │
-│                                                                  │
-│  4. Transform & Validate                                         │
-│     ├─► Normalize schemas                                        │
-│     ├─► Apply business rules                                     │
-│     ├─► Quality checks (nulls, ranges, duplicates)               │
-│     └─► Flag anomalies                                           │
-│                                                                  │
-│  5. Calculate Features                                           │
-│     ├─► Load historical data for lookback                        │
-│     ├─► Execute features in dependency order                     │
-│     └─► Validate feature outputs                                 │
-│                                                                  │
-│  6. Persist to Database                                          │
-│     ├─► Upsert fact_ohlcv                                        │
-│     ├─► Upsert fact_macro                                        │
-│     ├─► Upsert fact_features                                     │
-│     └─► Update dimension tables if needed                        │
-│                                                                  │
-│  7. Finalize Run                                                 │
-│     ├─► Update pipeline_runs (status, counts, errors)            │
-│     ├─► Send notifications if errors                             │
-│     └─► Log completion metrics                                   │
-│                                                                  │
-└─────────────────────────────────────────────────────────────────┘
-```
+The current `PipelineOrchestrator.run` flow in `src/atlas/pipeline/orchestrator.py` is:
+
+1. Initialize orchestrator (create tables, setup providers).
+2. Create `pipeline_run` row with status `running`.
+3. Resolve provider list from CLI/config.
+4. Resolve instruments:
+   - explicit list if provided,
+   - else by tags,
+   - else `None` (provider decides full universe).
+5. Execute providers (parallel or sequential).
+6. Persist provider results:
+   - `tiingo` -> `fact_ohlcv`,
+   - `fred` -> `fact_macro`.
+7. Call feature phase hook (`_calculate_features`) when enabled.
+8. Determine overall run status (`success`, `partial`, `failed`).
+9. Complete `pipeline_run` with inserted/updated counts and errors.
+
+Implementation notes:
+
+- Raw-response archive to blob storage is not currently implemented in this flow.
+- Feature hook currently logs a placeholder and does not write `fact_feature`.
 
 ### 6.3 Backfill Strategy
 
@@ -572,7 +580,7 @@ async def run_backfill(
     Execute backfill for a date range.
     
     - Processes dates in batches to manage memory
-    - Skips weekends/holidays for market data
+    - Skips weekends by default; holiday skipping flag exists but holiday calendar logic is not implemented
     - Continues on partial failures
     - Logs progress and allows resume
     """
@@ -583,7 +591,7 @@ async def run_backfill(
 All writes use **upsert semantics** based on natural keys:
 - `fact_ohlcv`: (instrument_id, trade_date)
 - `fact_macro`: (series_id, obs_date)
-- `fact_features`: (instrument_id, trade_date, feature_name)
+- `fact_feature`: (instrument_id, trade_date, feature_name)
 
 Re-running for the same date safely updates existing records.
 
@@ -597,16 +605,13 @@ Re-running for the same date safely updates existing records.
 config/
 ├── default.yaml          # Base configuration
 ├── providers/
-│   ├── tiingo.yaml       # Tiingo-specific settings
-│   └── fred.yaml         # FRED-specific settings
+│   └── fred_series.yaml  # FRED series definitions
 ├── instruments/
-│   ├── universe.csv      # Full instrument list
-│   └── portfolios.yaml   # Portfolio/tag definitions
+│   └── tags.yaml         # Tag definitions
 ├── features/
 │   └── registry.yaml     # Feature definitions
 └── environments/
     ├── development.yaml  # Dev overrides
-    ├── staging.yaml      # Staging overrides
     └── production.yaml   # Prod overrides
 ```
 
@@ -615,9 +620,9 @@ config/
 ```yaml
 # default.yaml
 pipeline:
-  schedule: "0 0 * * *"  # Midnight UTC
+  schedule: "0 5 * * *"  # 5 AM UTC
   timezone: "America/New_York"
-  completion_target_hour: 6  # Target completion by 6 AM ET
+  completion_target_hour: 6
   
   retry:
     max_attempts: 3
@@ -628,7 +633,7 @@ pipeline:
 
 database:
   driver: "mssql+pyodbc"
-  connection_string_env: "ATLAS_DB_CONNECTION"
+  connection_string_key: "atlas-db-connection"
   pool_size: 5
   max_overflow: 10
 
@@ -645,8 +650,9 @@ logging:
 notifications:
   on_failure: true
   channels:
-    - type: "email"
-      recipients_env: "ATLAS_ALERT_EMAILS"
+    email:
+      enabled: true
+      recipients_secret: "atlas-alert-emails"
 ```
 
 ### 7.3 Secrets Management
@@ -657,8 +663,9 @@ All secrets stored in Azure Key Vault:
 |-------------|-------------|
 | `tiingo-api-key` | Tiingo API key |
 | `fred-api-key` | FRED API key |
-| `db-connection-string` | Database connection string |
-| `dashboard-secret-key` | Streamlit session secret |
+| `atlas-db-connection` | Database connection string |
+| `atlas-dashboard-users` | Dashboard users JSON |
+| `atlas-session-secret` | Dashboard session secret |
 
 Application accesses via Managed Identity (no credentials in code).
 
@@ -731,7 +738,7 @@ Application accesses via Managed Identity (no credentials in code).
 
 | Component | Auth Method |
 |-----------|-------------|
-| Dashboard | Username/Password (V1), Azure AD (V2) |
+| Dashboard | Username/password via `ATLAS_DASHBOARD_USERS` SHA-256 hashes |
 | Database | Azure AD + Managed Identity |
 | Key Vault | Managed Identity |
 | APIs | API Key in header |
@@ -753,7 +760,8 @@ Application accesses via Managed Identity (no credentials in code).
 | Metric | Description | Alert Threshold |
 |--------|-------------|-----------------|
 | `pipeline.duration_seconds` | Total run time | > 7200 (2 hours) |
-| `pipeline.records_processed` | Records per run | < expected -20% |
+| `pipeline.records_inserted` | New records per run | Unexpected drop vs baseline |
+| `pipeline.records_updated` | Updated records per run | Unexpected spike vs baseline |
 | `pipeline.errors_count` | Errors per run | > 0 |
 | `provider.fetch_duration` | Per-provider fetch time | > 600 (10 min) |
 | `provider.records_fetched` | Records per provider | < expected -20% |
@@ -813,7 +821,7 @@ Structured JSON logs with:
 |-----------|---------|
 | Manual run | `atlas run --date 2026-01-25` |
 | Backfill | `atlas backfill --start 2020-01-01 --end 2026-01-25` |
-| Add provider | Create provider class, register in config |
+| Add provider | Create provider class, register in code and update orchestrator persistence |
 | Add feature | Create feature class, register in config |
 | View logs | Azure Portal > Application Insights |
 

@@ -13,6 +13,17 @@ ATLAS is a cloud-native data pipeline system designed for institutional investme
 - **Streamlit Dashboard** - Web interface for data exploration and monitoring
 - **Azure-Ready** - Infrastructure-as-code templates for Azure deployment
 
+## Implementation Status (Code-Verified)
+
+The sections below are verified against the current code in `src/atlas/`:
+
+- **Primary entrypoint:** CLI commands in `src/atlas/cli/main.py` (`atlas run`, `atlas backfill`, `atlas status`, etc.).
+- **Run scheduling:** `pipeline.schedule` exists in config, but in-repo execution is manual CLI driven; cron/timer wiring is external to this repo.
+- **Provider persistence:** `PipelineOrchestrator` currently persists data only for providers named `tiingo` and `fred`.
+- **Feature calculation in pipeline:** `PipelineOrchestrator._calculate_features()` is a placeholder; `FeatureEngineV2` exists but is not yet wired into `atlas run`.
+- **Dashboard features page:** currently a placeholder ("coming soon"), not a query/view over `fact_feature`.
+- **Instrument CLI actions:** `atlas instruments` supports `list`, `add-tag`, and `remove-tag`. `sync` is listed in help text but not implemented.
+
 ## Quick Start
 
 ### Prerequisites
@@ -95,9 +106,17 @@ atlas dashboard
 
 Then open http://localhost:8501 in your browser.
 
-**Default credentials:**
+**Development default credentials (do not use in shared environments):**
 - Username: `admin` or `analyst`
 - Password: `atlas123`
+
+`atlas dashboard` launches Streamlit using the relative path `src/atlas/dashboard/app.py`, so run it from the repository root.
+
+### Operational Runbook
+
+For day-2 operations, troubleshooting, and known pitfalls, see:
+
+- [`docs/OPERATIONS_RUNBOOK.md`](docs/OPERATIONS_RUNBOOK.md)
 
 ## Project Structure
 
@@ -131,8 +150,9 @@ UDRv4/
 │   │   └── repository.py      # Data access layer
 │   ├── features/              # Feature engineering
 │   │   ├── base.py            # Base feature class
-│   │   ├── registry.py        # Feature registry
-│   │   └── engine.py          # Calculation engine
+│   │   ├── registry.py        # Legacy feature registry
+│   │   ├── engine.py          # Legacy calculation engine
+│   │   └── engine_v2.py       # Current feature engine implementation
 │   ├── dashboard/             # Streamlit app
 │   │   ├── app.py             # Main dashboard
 │   │   └── auth.py            # Authentication
@@ -141,7 +161,8 @@ UDRv4/
 ├── infrastructure/            # Infrastructure as code
 │   └── azure/                 # Azure Bicep templates
 ├── docs/                      # Documentation
-│   └── ARCHITECTURE_DOCUMENT.md
+│   ├── ARCHITECTURE_DOCUMENT.md
+│   └── OPERATIONS_RUNBOOK.md
 ├── tests/                     # Test suite
 ├── pyproject.toml             # Project configuration
 └── README.md                  # This file
@@ -172,12 +193,12 @@ UDRv4/
 
 - **fact_ohlcv** - Daily OHLCV price data (raw + adjusted)
 - **fact_macro** - Macroeconomic indicator observations
-- **fact_features** - Calculated feature values
+- **fact_feature** - Calculated feature values
 
 ### Operational Tables
 
 - **instrument_tag** - Many-to-many instrument tags
-- **pipeline_run** - Pipeline execution history
+- **pipeline_run** - Pipeline execution history and status
 
 ## Adding New Providers
 
@@ -210,6 +231,9 @@ class MyProvider(BaseProvider):
 
 2. Register in `providers/registry.py`
 3. Add configuration in `config/default.yaml`
+4. Update `PipelineOrchestrator._persist_results()` so fetched records are actually written.
+
+> Current implementation only has persistence branches for providers named `tiingo` and `fred`.
 
 ## Adding New Features
 
@@ -240,7 +264,9 @@ class MyFeature(BaseFeature):
         ...
 ```
 
-2. Register in `features/registry.py`
+2. Register in `features/registry.py` (or `features/schema.py` for the V2 schema path)
+
+> `FeatureEngineV2` is implemented in `src/atlas/features/engine_v2.py` but is not currently wired into `atlas run`.
 
 ## Azure Deployment
 
@@ -283,6 +309,22 @@ export SQL_ADMIN_PASSWORD="your_secure_password"
 | `ATLAS_ENV` | Environment (development/production) | No |
 | `ATLAS_KEYVAULT_URL` | Azure Key Vault URL | For Azure |
 | `ATLAS_DASHBOARD_USERS` | JSON user credentials | For production |
+
+### Dashboard Credentials Format (`ATLAS_DASHBOARD_USERS`)
+
+`ATLAS_DASHBOARD_USERS` must be JSON mapping usernames to **SHA-256 password hashes**.
+
+Example:
+
+```bash
+python -c "import hashlib, json; print(json.dumps({'admin': hashlib.sha256('replace-me'.encode()).hexdigest()}))"
+```
+
+Then export the resulting JSON string:
+
+```bash
+export ATLAS_DASHBOARD_USERS='{"admin":"<sha256-hash>"}'
+```
 
 ## FRED Data Categories
 
