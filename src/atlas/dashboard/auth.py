@@ -2,12 +2,19 @@
 
 import hashlib
 import json
+import logging
 import os
-from typing import Optional
 
 import streamlit as st
 
-from atlas.core.config import get_settings
+logger = logging.getLogger(__name__)
+
+_TRUTHY_ENV_VALUES = {"1", "true", "yes", "on"}
+_DEFAULT_PASSWORD_HASH = hashlib.sha256("atlas123".encode()).hexdigest()
+_DEFAULT_USERS = {
+    "admin": _DEFAULT_PASSWORD_HASH,
+    "analyst": _DEFAULT_PASSWORD_HASH,
+}
 
 
 def get_users() -> dict[str, str]:
@@ -24,18 +31,33 @@ def get_users() -> dict[str, str]:
     users_json = os.getenv("ATLAS_DASHBOARD_USERS")
     if users_json:
         try:
-            return json.loads(users_json)
+            loaded_users = json.loads(users_json)
         except json.JSONDecodeError:
-            pass
-    
-    # Default users for development (password: atlas123)
-    # In production, set ATLAS_DASHBOARD_USERS or use Key Vault
-    default_password_hash = hashlib.sha256("atlas123".encode()).hexdigest()
-    
-    return {
-        "admin": default_password_hash,
-        "analyst": default_password_hash,
-    }
+            logger.error("Invalid ATLAS_DASHBOARD_USERS JSON; disabling logins")
+            return {}
+
+        if not isinstance(loaded_users, dict):
+            logger.error("ATLAS_DASHBOARD_USERS must be a JSON object; disabling logins")
+            return {}
+
+        users: dict[str, str] = {}
+        for username, password_hash in loaded_users.items():
+            if not isinstance(username, str) or not isinstance(password_hash, str):
+                logger.error("ATLAS_DASHBOARD_USERS entries must be string:string pairs")
+                return {}
+            users[username] = password_hash
+
+        return users
+
+    # Optional development fallback for local demos.
+    # This is intentionally opt-in so production does not silently expose defaults.
+    allow_default_users = (
+        os.getenv("ATLAS_DASHBOARD_ALLOW_DEFAULT_USERS", "").strip().lower() in _TRUTHY_ENV_VALUES
+    )
+    if allow_default_users:
+        return _DEFAULT_USERS.copy()
+
+    return {}
 
 
 def hash_password(password: str) -> str:
@@ -98,18 +120,23 @@ def show_login() -> None:
             else:
                 st.error("Invalid username or password")
     
-    # Development hint
-    st.markdown("""
-    ---
-    
-    **Development Mode**
-    
-    Default credentials:
-    - Username: `admin` or `analyst`
-    - Password: `atlas123`
-    
-    *Set `ATLAS_DASHBOARD_USERS` environment variable with JSON credentials for production.*
-    """)
+    allow_default_users = (
+        os.getenv("ATLAS_DASHBOARD_ALLOW_DEFAULT_USERS", "").strip().lower() in _TRUTHY_ENV_VALUES
+    )
+    if allow_default_users:
+        st.markdown("""
+        ---
+        
+        **Development Mode**
+        
+        Default credentials:
+        - Username: `admin` or `analyst`
+        - Password: `atlas123`
+        
+        *Set `ATLAS_DASHBOARD_USERS` to disable development credentials.*
+        """)
+    else:
+        st.caption("Configure `ATLAS_DASHBOARD_USERS` with dashboard credentials.")
 
 
 def logout() -> None:
