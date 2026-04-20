@@ -95,9 +95,11 @@ atlas dashboard
 
 Then open http://localhost:8501 in your browser.
 
-**Default credentials:**
-- Username: `admin` or `analyst`
-- Password: `atlas123`
+**Authentication setup:**
+- Configure `ATLAS_DASHBOARD_USERS` with JSON credentials (`{"username":"sha256_hash"}`)
+- Optional local-only demo fallback: set `ATLAS_DASHBOARD_ALLOW_DEFAULT_USERS=true` to enable:
+  - Username: `admin` or `analyst`
+  - Password: `atlas123`
 
 ## Project Structure
 
@@ -283,6 +285,7 @@ export SQL_ADMIN_PASSWORD="your_secure_password"
 | `ATLAS_ENV` | Environment (development/production) | No |
 | `ATLAS_KEYVAULT_URL` | Azure Key Vault URL | For Azure |
 | `ATLAS_DASHBOARD_USERS` | JSON user credentials | For production |
+| `ATLAS_DASHBOARD_ALLOW_DEFAULT_USERS` | Enable local demo credentials (`admin`/`analyst`) | Local development only |
 
 ## FRED Data Categories
 
