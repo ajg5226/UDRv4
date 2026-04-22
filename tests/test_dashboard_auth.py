@@ -1,5 +1,18 @@
 import json
+import sys
+import types
 from types import SimpleNamespace
+
+sys.modules.setdefault("streamlit", SimpleNamespace(session_state={}))
+fake_config = types.ModuleType("atlas.core.config")
+fake_secrets = types.ModuleType("atlas.core.secrets")
+fake_config.get_settings = lambda: SimpleNamespace(
+    environment="development",
+    dashboard=SimpleNamespace(auth=SimpleNamespace(users_secret="atlas-dashboard-users")),
+)
+fake_secrets.get_secret = lambda _: None
+sys.modules.setdefault("atlas.core.config", fake_config)
+sys.modules.setdefault("atlas.core.secrets", fake_secrets)
 
 from atlas.dashboard import auth
 
