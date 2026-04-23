@@ -10,6 +10,19 @@ import streamlit as st
 from atlas.core.config import get_settings
 
 
+PRODUCTION_ENVIRONMENTS = {"production", "prod"}
+
+
+def _is_production_environment() -> bool:
+    """Return whether the application is running in production."""
+    env = os.getenv("ATLAS_ENV")
+    if env:
+        return env.strip().lower() in PRODUCTION_ENVIRONMENTS
+
+    settings = get_settings()
+    return settings.environment.strip().lower() in PRODUCTION_ENVIRONMENTS
+
+
 def get_users() -> dict[str, str]:
     """
     Get user credentials.
@@ -24,10 +37,23 @@ def get_users() -> dict[str, str]:
     users_json = os.getenv("ATLAS_DASHBOARD_USERS")
     if users_json:
         try:
-            return json.loads(users_json)
+            users = json.loads(users_json)
+            if isinstance(users, dict) and all(
+                isinstance(username, str) and isinstance(password_hash, str)
+                for username, password_hash in users.items()
+            ):
+                return users
         except json.JSONDecodeError:
-            pass
-    
+            if _is_production_environment():
+                raise RuntimeError(
+                    "ATLAS_DASHBOARD_USERS must be valid JSON in production."
+                ) from None
+
+    if _is_production_environment():
+        raise RuntimeError(
+            "Dashboard credentials are not configured. Set ATLAS_DASHBOARD_USERS in production."
+        )
+
     # Default users for development (password: atlas123)
     # In production, set ATLAS_DASHBOARD_USERS or use Key Vault
     default_password_hash = hashlib.sha256("atlas123".encode()).hexdigest()
@@ -43,7 +69,11 @@ def hash_password(password: str) -> str:
     return hashlib.sha256(password.encode()).hexdigest()
 
 
-def verify_password(username: str, password: str) -> bool:
+def verify_password(
+    username: str,
+    password: str,
+    users: Optional[dict[str, str]] = None,
+) -> bool:
     """
     Verify a username/password combination.
     
@@ -54,7 +84,7 @@ def verify_password(username: str, password: str) -> bool:
     Returns:
         True if credentials are valid
     """
-    users = get_users()
+    users = users or get_users()
     
     if username not in users:
         return False
@@ -75,6 +105,13 @@ def check_authentication() -> bool:
 
 def show_login() -> None:
     """Display the login form."""
+    try:
+        users = get_users()
+    except RuntimeError as exc:
+        st.title("🔐 ATLAS Login")
+        st.error(str(exc))
+        return
+
     st.title("🔐 ATLAS Login")
     
     st.markdown("""
@@ -90,7 +127,7 @@ def show_login() -> None:
         submitted = st.form_submit_button("Login")
         
         if submitted:
-            if verify_password(username, password):
+            if verify_password(username, password, users):
                 st.session_state["authenticated"] = True
                 st.session_state["username"] = username
                 st.success("Login successful!")
@@ -98,18 +135,19 @@ def show_login() -> None:
             else:
                 st.error("Invalid username or password")
     
-    # Development hint
-    st.markdown("""
-    ---
-    
-    **Development Mode**
-    
-    Default credentials:
-    - Username: `admin` or `analyst`
-    - Password: `atlas123`
-    
-    *Set `ATLAS_DASHBOARD_USERS` environment variable with JSON credentials for production.*
-    """)
+    if not _is_production_environment():
+        # Development hint
+        st.markdown("""
+        ---
+        
+        **Development Mode**
+        
+        Default credentials:
+        - Username: `admin` or `analyst`
+        - Password: `atlas123`
+        
+        *Set `ATLAS_DASHBOARD_USERS` environment variable with JSON credentials for production.*
+        """)
 
 
 def logout() -> None:
