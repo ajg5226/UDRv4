@@ -2,6 +2,7 @@
 
 import hashlib
 import importlib
+import os
 import sys
 import types
 
@@ -12,6 +13,14 @@ def _load_auth_module(monkeypatch: pytest.MonkeyPatch):
     """Load auth module with a lightweight streamlit stub."""
     streamlit_stub = types.SimpleNamespace(session_state={})
     monkeypatch.setitem(sys.modules, "streamlit", streamlit_stub)
+
+    config_stub = types.ModuleType("atlas.core.config")
+
+    def _get_settings():
+        return types.SimpleNamespace(environment=os.getenv("ATLAS_ENV", "development"))
+
+    config_stub.get_settings = _get_settings
+    monkeypatch.setitem(sys.modules, "atlas.core.config", config_stub)
     sys.modules.pop("atlas.dashboard.auth", None)
 
     import atlas.dashboard.auth as auth
