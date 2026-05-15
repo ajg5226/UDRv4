@@ -3,11 +3,11 @@
 from __future__ import annotations
 
 import json
+from collections.abc import Iterator
 from contextlib import contextmanager
 from datetime import date
 from decimal import Decimal
 from types import SimpleNamespace
-from typing import Iterator
 
 import pandas as pd
 import pytest
