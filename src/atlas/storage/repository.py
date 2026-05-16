@@ -6,8 +6,6 @@ from typing import Generic, Optional, Type, TypeVar
 
 import pandas as pd
 from sqlalchemy import and_, delete, select, update
-from sqlalchemy.dialects.postgresql import insert as pg_insert
-from sqlalchemy.dialects.sqlite import insert as sqlite_insert
 from sqlalchemy.orm import Session
 
 from atlas.core.logging import get_logger
@@ -26,30 +24,6 @@ from atlas.storage.models import (
 logger = get_logger(__name__)
 
 T = TypeVar("T", bound=Base)
-
-
-def _is_missing_value(value: object) -> bool:
-    """Return True for None/NaN-like values without treating numeric zero as missing."""
-    if value is None:
-        return True
-    try:
-        return bool(pd.isna(value))
-    except (TypeError, ValueError):
-        return False
-
-
-def _normalize_missing_value(value: object) -> object:
-    """Convert pandas/numpy missing sentinels to None for ORM writes."""
-    if _is_missing_value(value):
-        return None
-    return value
-
-
-def _float_or_none(value: object) -> Optional[float]:
-    """Convert stored numeric values while preserving legitimate zeroes."""
-    if _is_missing_value(value):
-        return None
-    return float(value)
 
 
 class BaseRepository(Generic[T]):
@@ -139,7 +113,10 @@ class InstrumentRepository(BaseRepository[DimInstrument]):
     def get_by_tags(self, tags: list[str]) -> list[DimInstrument]:
         """Get instruments that have any of the specified tags."""
         stmt = (
-            select(DimInstrument).join(InstrumentTag).where(InstrumentTag.tag.in_(tags)).distinct()
+            select(DimInstrument)
+            .join(InstrumentTag)
+            .where(InstrumentTag.tag.in_(tags))
+            .distinct()
         )
         return list(self.session.scalars(stmt))
 
@@ -153,9 +130,9 @@ class InstrumentRepository(BaseRepository[DimInstrument]):
     def upsert_from_dataframe(self, df: pd.DataFrame) -> int:
         """
         Upsert instruments from a DataFrame.
-
+        
         Expected columns: ticker, name, exchange, asset_type, currency, sector, industry
-
+        
         Returns count of records processed.
         """
         if df.empty:
@@ -310,7 +287,7 @@ class OHLCVRepository(BaseRepository[FactOHLCV]):
     ) -> pd.DataFrame:
         """Get OHLCV data as a DataFrame."""
         stmt = select(FactOHLCV)
-
+        
         conditions = []
         if instrument_ids:
             conditions.append(FactOHLCV.instrument_id.in_(instrument_ids))
@@ -318,26 +295,26 @@ class OHLCVRepository(BaseRepository[FactOHLCV]):
             conditions.append(FactOHLCV.trade_date >= start_date)
         if end_date:
             conditions.append(FactOHLCV.trade_date <= end_date)
-
+        
         if conditions:
             stmt = stmt.where(and_(*conditions))
-
+        
         stmt = stmt.order_by(FactOHLCV.instrument_id, FactOHLCV.trade_date)
-
+        
         results = self.session.execute(stmt)
         records = [
             {
                 "instrument_id": r.instrument_id,
                 "trade_date": r.trade_date,
-                "open": _float_or_none(r.open),
-                "high": _float_or_none(r.high),
-                "low": _float_or_none(r.low),
-                "close": _float_or_none(r.close),
+                "open": float(r.open) if r.open else None,
+                "high": float(r.high) if r.high else None,
+                "low": float(r.low) if r.low else None,
+                "close": float(r.close) if r.close else None,
                 "volume": r.volume,
-                "adj_open": _float_or_none(r.adj_open),
-                "adj_high": _float_or_none(r.adj_high),
-                "adj_low": _float_or_none(r.adj_low),
-                "adj_close": _float_or_none(r.adj_close),
+                "adj_open": float(r.adj_open) if r.adj_open else None,
+                "adj_high": float(r.adj_high) if r.adj_high else None,
+                "adj_low": float(r.adj_low) if r.adj_low else None,
+                "adj_close": float(r.adj_close) if r.adj_close else None,
                 "adj_volume": r.adj_volume,
             }
             for r in results.scalars()
@@ -352,7 +329,7 @@ class OHLCVRepository(BaseRepository[FactOHLCV]):
     ) -> tuple[int, int]:
         """
         Upsert a batch of OHLCV records.
-
+        
         Returns (inserted_count, updated_count).
         """
         if not records:
@@ -362,7 +339,6 @@ class OHLCVRepository(BaseRepository[FactOHLCV]):
         updated = 0
 
         for record in records:
-            record = {key: _normalize_missing_value(value) for key, value in record.items()}
             record["source_id"] = source_id
             if run_id:
                 record["run_id"] = run_id
@@ -375,7 +351,7 @@ class OHLCVRepository(BaseRepository[FactOHLCV]):
             if existing:
                 # Update
                 for key, value in record.items():
-                    if hasattr(existing, key) and not _is_missing_value(value):
+                    if hasattr(existing, key):
                         setattr(existing, key, value)
                 updated += 1
             else:
@@ -435,7 +411,7 @@ class MacroRepository(BaseRepository[FactMacro]):
     ) -> pd.DataFrame:
         """Get macro data as a DataFrame."""
         stmt = select(FactMacro).join(DimMacroSeries)
-
+        
         conditions = []
         if series_ids:
             conditions.append(FactMacro.series_id.in_(series_ids))
@@ -445,16 +421,16 @@ class MacroRepository(BaseRepository[FactMacro]):
             conditions.append(FactMacro.obs_date >= start_date)
         if end_date:
             conditions.append(FactMacro.obs_date <= end_date)
-
+        
         if conditions:
             stmt = stmt.where(and_(*conditions))
-
+        
         results = self.session.execute(stmt)
         records = [
             {
                 "series_id": r.series_id,
                 "obs_date": r.obs_date,
-                "value": _float_or_none(r.value),
+                "value": float(r.value) if r.value else None,
             }
             for r in results.scalars()
         ]
@@ -474,7 +450,6 @@ class MacroRepository(BaseRepository[FactMacro]):
         updated = 0
 
         for record in records:
-            record = {key: _normalize_missing_value(value) for key, value in record.items()}
             record["source_id"] = source_id
             if run_id:
                 record["run_id"] = run_id
@@ -482,9 +457,8 @@ class MacroRepository(BaseRepository[FactMacro]):
             existing = self.get_by_series_date(record["series_id"], record["obs_date"])
 
             if existing:
-                if not _is_missing_value(record["value"]):
-                    existing.value = record["value"]
-                    updated += 1
+                existing.value = record["value"]
+                updated += 1
             else:
                 self.session.add(FactMacro(**record))
                 inserted += 1
@@ -522,28 +496,28 @@ class FeatureRepository(BaseRepository[FactFeature]):
     ) -> pd.DataFrame:
         """Get all features for a date as a DataFrame (pivoted by feature name)."""
         stmt = select(FactFeature).where(FactFeature.trade_date == trade_date)
-
+        
         if feature_names:
             stmt = stmt.where(FactFeature.feature_name.in_(feature_names))
         if instrument_ids:
             stmt = stmt.where(FactFeature.instrument_id.in_(instrument_ids))
-
+        
         results = list(self.session.scalars(stmt))
-
+        
         if not results:
             return pd.DataFrame()
-
+        
         records = [
             {
                 "instrument_id": r.instrument_id,
                 "trade_date": r.trade_date,
                 "feature_name": r.feature_name,
-                "value": _float_or_none(r.value),
+                "value": float(r.value) if r.value else None,
             }
             for r in results
         ]
         df = pd.DataFrame(records)
-
+        
         # Pivot to wide format
         if not df.empty:
             df = df.pivot(
@@ -551,7 +525,7 @@ class FeatureRepository(BaseRepository[FactFeature]):
                 columns="feature_name",
                 values="value",
             ).reset_index()
-
+        
         return df
 
     def upsert_batch(
@@ -567,7 +541,6 @@ class FeatureRepository(BaseRepository[FactFeature]):
         updated = 0
 
         for record in records:
-            record = {key: _normalize_missing_value(value) for key, value in record.items()}
             if run_id:
                 record["run_id"] = run_id
 
@@ -578,9 +551,8 @@ class FeatureRepository(BaseRepository[FactFeature]):
             )
 
             if existing:
-                if not _is_missing_value(record["value"]):
-                    existing.value = record["value"]
-                    updated += 1
+                existing.value = record["value"]
+                updated += 1
             else:
                 self.session.add(FactFeature(**record))
                 inserted += 1
