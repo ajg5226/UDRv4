@@ -7,7 +7,7 @@ ATLAS is a cloud-native data pipeline system designed for institutional investme
 - **Automated Nightly Pipeline** - Scheduled data collection from multiple providers
 - **Multi-Provider Architecture** - Modular support for Tiingo, FRED, and future providers
 - **Historical Backfill** - Load and process historical data for any date range
-- **Feature Engineering** - Extensible framework for derived analytics
+- **Feature Engineering** - Catalog-driven framework for derived analytics
 - **Portfolio Tagging** - Tag instruments for portfolio tracking and subset analysis
 - **Macro Data Categorization** - FRED data organized by Growth, Liquidity, Risk Appetite
 - **Streamlit Dashboard** - Web interface for data exploration and monitoring
@@ -77,6 +77,11 @@ atlas run --providers tiingo,fred
 atlas run --tags portfolio_main
 ```
 
+`atlas run` currently wires provider ingestion and database persistence through
+`PipelineOrchestrator`. Feature Engine V2 is implemented separately in
+`src/atlas/features/engine_v2.py`; the orchestrator's feature hook is still a
+placeholder, so run the engine directly when you need feature rows populated.
+
 ### Backfill Historical Data
 
 ```bash
@@ -86,6 +91,11 @@ atlas backfill --start 2020-01-01 --end 2026-01-24
 # Dry run to see what would be processed
 atlas backfill --start 2020-01-01 --end 2026-01-24 --dry-run
 ```
+
+For an initial local load, `python3 scripts/backfill_5year.py` performs a
+direct Tiingo/FRED backfill over roughly five years using the active instruments
+already stored in the database. Prefer the CLI backfill for normal operational
+reruns because it records per-date `pipeline_run` metadata.
 
 ### Launch the Dashboard
 
@@ -130,19 +140,25 @@ UDRv4/
 │   │   ├── database.py        # Connection management
 │   │   └── repository.py      # Data access layer
 │   ├── features/              # Feature engineering
-│   │   ├── base.py            # Base feature class
-│   │   ├── registry.py        # Feature registry
-│   │   └── engine.py          # Calculation engine
+│   │   ├── schema.py          # V2 feature catalog and metadata
+│   │   ├── generators.py      # Family-specific calculations
+│   │   ├── transforms.py      # Cross-sectional transforms
+│   │   ├── diagnostics.py     # IC and hit-rate diagnostics helpers
+│   │   ├── engine_v2.py       # V2 calculation engine
+│   │   └── engine.py          # Legacy calculation engine
 │   ├── dashboard/             # Streamlit app
 │   │   ├── app.py             # Main dashboard
 │   │   └── auth.py            # Authentication
 │   └── cli/                   # Command-line interface
 │       └── main.py            # CLI commands
+├── scripts/
+│   ├── validate_local.py      # Local component validation harness
+│   └── backfill_5year.py      # Direct 5-year provider backfill helper
 ├── infrastructure/            # Infrastructure as code
 │   └── azure/                 # Azure Bicep templates
 ├── docs/                      # Documentation
-│   └── ARCHITECTURE_DOCUMENT.md
-├── tests/                     # Test suite
+│   ├── ARCHITECTURE_DOCUMENT.md
+│   └── FEATURE_ENGINE.md
 ├── pyproject.toml             # Project configuration
 └── README.md                  # This file
 ```
@@ -172,12 +188,13 @@ UDRv4/
 
 - **fact_ohlcv** - Daily OHLCV price data (raw + adjusted)
 - **fact_macro** - Macroeconomic indicator observations
-- **fact_features** - Calculated feature values
+- **fact_feature** - Calculated feature values with versioning and transform lineage
 
 ### Operational Tables
 
 - **instrument_tag** - Many-to-many instrument tags
 - **pipeline_run** - Pipeline execution history
+- **feature_diagnostic** - Feature IC, hit-rate, and stability diagnostics storage
 
 ## Adding New Providers
 
@@ -213,34 +230,15 @@ class MyProvider(BaseProvider):
 
 ## Adding New Features
 
-1. Create a feature class inheriting from `BaseFeature`:
+Feature Engine V2 uses `src/atlas/features/schema.py` as the source of truth.
 
-```python
-from atlas.features.base import BaseFeature
+1. Add a `FeatureDefinition` to `FEATURE_CATALOG`.
+2. Implement or extend the matching family generator in `features/generators.py`.
+3. Run `python3 scripts/validate_local.py` to validate the catalog, generators,
+   and transforms.
 
-class MyFeature(BaseFeature):
-    @property
-    def name(self) -> str:
-        return "my_feature"
-    
-    @property
-    def category(self) -> str:
-        return "custom"
-    
-    @property
-    def dependencies(self) -> list[str]:
-        return ["adj_close"]  # Required input data
-    
-    @property
-    def lookback_days(self) -> int:
-        return 20
-    
-    def calculate(self, data, target_date, parameters=None):
-        # Implementation
-        ...
-```
-
-2. Register in `features/registry.py`
+See [docs/FEATURE_ENGINE.md](docs/FEATURE_ENGINE.md) for naming rules,
+transform behavior, persistence fields, and current runtime constraints.
 
 ## Azure Deployment
 
@@ -311,11 +309,26 @@ ATLAS organizes ~100 FRED series into three categories:
 
 ## Development
 
+### Local Validation
+
+```bash
+python3 scripts/validate_local.py
+```
+
+The validation script checks configuration loading, database table creation,
+instrument CSV loading, the V2 feature schema, feature generators, panel
+transforms, and basic pipeline object construction. Provider initialization
+requires `TIINGO_API_KEY` and `FRED_API_KEY` for full success.
+
 ### Running Tests
 
 ```bash
 pytest
 ```
+
+`pyproject.toml` is configured for `tests/`, but this repository currently does
+not include a committed test suite. Use `scripts/validate_local.py` for the
+available smoke validation until tests are added.
 
 ### Code Quality
 
