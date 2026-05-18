@@ -1,37 +1,59 @@
 """Simple authentication for ATLAS dashboard."""
 
 import hashlib
+import hmac
 import json
-import os
-from typing import Optional
 
 import streamlit as st
 
 from atlas.core.config import get_settings
+from atlas.core.secrets import get_secret
+
+
+DEVELOPMENT_ENVIRONMENTS = {"development", "dev", "local", "test", "testing"}
+
+
+def _is_development_environment(environment: str) -> bool:
+    """Return true only where bundled local dashboard users are acceptable."""
+    return environment.lower() in DEVELOPMENT_ENVIRONMENTS
 
 
 def get_users() -> dict[str, str]:
     """
     Get user credentials.
-    
-    In production, this would load from Key Vault.
-    For development, uses environment variable or defaults.
-    
+
+    In production, load from the configured secret and fail closed when missing
+    or malformed. Development-like environments can use default local users.
+
     Returns:
         Dict of username -> password_hash
     """
-    # Try environment variable first (JSON format)
-    users_json = os.getenv("ATLAS_DASHBOARD_USERS")
+    settings = get_settings()
+    users_json = get_secret(settings.dashboard.auth.users_secret)
     if users_json:
         try:
-            return json.loads(users_json)
+            users = json.loads(users_json)
         except json.JSONDecodeError:
-            pass
-    
-    # Default users for development (password: atlas123)
-    # In production, set ATLAS_DASHBOARD_USERS or use Key Vault
+            return _default_users() if _is_development_environment(settings.environment) else {}
+
+        if isinstance(users, dict) and all(
+            isinstance(username, str) and isinstance(password_hash, str)
+            for username, password_hash in users.items()
+        ):
+            return users
+
+        return _default_users() if _is_development_environment(settings.environment) else {}
+
+    if not _is_development_environment(settings.environment):
+        return {}
+
+    return _default_users()
+
+
+def _default_users() -> dict[str, str]:
+    """Default local users for development and tests."""
     default_password_hash = hashlib.sha256("atlas123".encode()).hexdigest()
-    
+
     return {
         "admin": default_password_hash,
         "analyst": default_password_hash,
@@ -46,11 +68,11 @@ def hash_password(password: str) -> str:
 def verify_password(username: str, password: str) -> bool:
     """
     Verify a username/password combination.
-    
+
     Args:
         username: Username to verify
         password: Plain text password
-        
+
     Returns:
         True if credentials are valid
     """
@@ -58,9 +80,9 @@ def verify_password(username: str, password: str) -> bool:
     
     if username not in users:
         return False
-    
+
     password_hash = hash_password(password)
-    return password_hash == users[username]
+    return hmac.compare_digest(password_hash, users[username])
 
 
 def check_authentication() -> bool:
@@ -98,8 +120,8 @@ def show_login() -> None:
             else:
                 st.error("Invalid username or password")
     
-    # Development hint
-    st.markdown("""
+    if _is_development_environment(get_settings().environment):
+        st.markdown("""
     ---
     
     **Development Mode**
