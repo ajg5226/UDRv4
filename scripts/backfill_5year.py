@@ -240,7 +240,7 @@ async def main():
                 if db_series_id and not df.empty:
                     for _, row in df.iterrows():
                         if row.get("value") is not None:
-                            obs_date = row.get("date")
+                            obs_date = row.get("obs_date")
                             if obs_date is not None:
                                 if hasattr(obs_date, "date"):
                                     obs_date = obs_date.date()
