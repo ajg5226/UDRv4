@@ -17,6 +17,7 @@ st.set_page_config(
 
 from atlas.dashboard.auth import check_authentication, show_login
 from atlas.core.config import get_settings
+from atlas.core.exceptions import ConfigurationError
 from atlas.core.logging import setup_logging
 from atlas.storage.database import get_database
 from atlas.storage.repository import (
@@ -36,6 +37,9 @@ def main() -> None:
     settings = get_settings()
     
     # Authentication
+    if settings.environment.lower() == "production" and not settings.dashboard.auth.enabled:
+        raise ConfigurationError("Dashboard authentication cannot be disabled in production")
+
     if settings.dashboard.auth.enabled:
         if not check_authentication():
             show_login()
