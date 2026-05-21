@@ -9,7 +9,6 @@ from atlas.core.config import get_settings
 from atlas.core.exceptions import ConfigurationError
 from atlas.core.secrets import get_secret
 
-
 DEVELOPMENT_ENVIRONMENTS = {"development", "dev", "local", "test", "testing"}
 
 
