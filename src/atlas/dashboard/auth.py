@@ -2,7 +2,6 @@
 
 import hashlib
 import json
-from typing import Optional
 
 import streamlit as st
 
@@ -33,7 +32,10 @@ def _parse_users(users_json: str) -> dict[str, str]:
     users = json.loads(users_json)
     if not isinstance(users, dict) or not users:
         raise ValueError("Dashboard users must be a non-empty JSON object")
-    if not all(isinstance(username, str) and isinstance(password_hash, str) for username, password_hash in users.items()):
+    if not all(
+        isinstance(username, str) and isinstance(password_hash, str)
+        for username, password_hash in users.items()
+    ):
         raise ValueError("Dashboard users must map usernames to password hashes")
     return users
 
