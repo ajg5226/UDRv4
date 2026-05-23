@@ -21,6 +21,13 @@ def find_project_root() -> Path:
 
 PROJECT_ROOT = find_project_root()
 CONFIG_DIR = PROJECT_ROOT / "config"
+LOCAL_ENVIRONMENTS = {"development", "dev", "local", "test", "testing"}
+
+
+def is_local_environment(environment: Optional[str] = None) -> bool:
+    """Return whether an environment may use local development defaults."""
+    env = environment if environment is not None else os.getenv("ATLAS_ENV", "development")
+    return env.strip().lower() in LOCAL_ENVIRONMENTS
 
 
 class RetryConfig(BaseModel):
