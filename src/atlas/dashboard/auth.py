@@ -1,16 +1,14 @@
 """Simple authentication for ATLAS dashboard."""
 
-import hmac
 import hashlib
+import hmac
 import json
 import os
-from typing import Optional
 
 import streamlit as st
 
 from atlas.core.config import get_settings
 from atlas.core.exceptions import ConfigurationError
-
 
 DEVELOPMENT_ENVIRONMENTS = {"development", "dev", "local", "test", "testing"}
 
@@ -28,7 +26,10 @@ def _parse_users(users_json: str, source: str) -> dict[str, str]:
     if not isinstance(users, dict) or not users:
         raise ConfigurationError(f"Dashboard users from {source} must be a non-empty JSON object")
 
-    if not all(isinstance(username, str) and isinstance(password_hash, str) for username, password_hash in users.items()):
+    if not all(
+        isinstance(username, str) and isinstance(password_hash, str)
+        for username, password_hash in users.items()
+    ):
         raise ConfigurationError(
             f"Dashboard users from {source} must map usernames to password hashes"
         )
@@ -74,10 +75,10 @@ def get_users() -> dict[str, str]:
         raise ConfigurationError(
             "Dashboard users are required outside development environments"
         )
-    
+
     # Default users for development (password: atlas123)
-    default_password_hash = hashlib.sha256("atlas123".encode()).hexdigest()
-    
+    default_password_hash = hashlib.sha256(b"atlas123").hexdigest()
+
     return {
         "admin": default_password_hash,
         "analyst": default_password_hash,
