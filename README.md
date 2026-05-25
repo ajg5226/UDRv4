@@ -61,6 +61,13 @@ ATLAS_DB_CONNECTION=sqlite:///atlas_dev.db
 atlas init-db
 ```
 
+For a source-backed local smoke check that also bootstraps instruments from
+`ATLAS_INPUT_TEMPLATE_V1.csv`, run:
+
+```bash
+python3 scripts/validate_local.py
+```
+
 ### Run the Pipeline
 
 ```bash
@@ -75,6 +82,9 @@ atlas run --providers tiingo,fred
 
 # Run for instruments with specific tags
 atlas run --tags portfolio_main
+
+# Make the current placeholder feature stage explicit
+atlas run --skip-features
 ```
 
 ### Backfill Historical Data
@@ -85,6 +95,9 @@ atlas backfill --start 2020-01-01 --end 2026-01-24
 
 # Dry run to see what would be processed
 atlas backfill --start 2020-01-01 --end 2026-01-24 --dry-run
+
+# Process dates in 30-day batches
+atlas backfill --start 2020-01-01 --end 2026-01-24 --batch-size 30
 ```
 
 ### Launch the Dashboard
@@ -110,7 +123,7 @@ UDRv4/
 │   ├── instruments/           # Instrument configs
 │   │   └── tags.yaml          # Tag definitions
 │   └── features/              # Feature configs
-│       └── registry.yaml      # Feature definitions
+│       └── registry.yaml      # Legacy feature definitions
 ├── src/atlas/                  # Main package
 │   ├── core/                  # Core utilities
 │   │   ├── config.py          # Configuration management
@@ -130,9 +143,11 @@ UDRv4/
 │   │   ├── database.py        # Connection management
 │   │   └── repository.py      # Data access layer
 │   ├── features/              # Feature engineering
-│   │   ├── base.py            # Base feature class
-│   │   ├── registry.py        # Feature registry
-│   │   └── engine.py          # Calculation engine
+│   │   ├── schema.py          # V2 feature catalog
+│   │   ├── generators.py      # Family-specific calculations
+│   │   ├── transforms.py      # Cross-sectional transforms
+│   │   ├── diagnostics.py     # IC and hit-rate metrics
+│   │   └── engine_v2.py       # V2 calculation engine
 │   ├── dashboard/             # Streamlit app
 │   │   ├── app.py             # Main dashboard
 │   │   └── auth.py            # Authentication
@@ -141,8 +156,10 @@ UDRv4/
 ├── infrastructure/            # Infrastructure as code
 │   └── azure/                 # Azure Bicep templates
 ├── docs/                      # Documentation
-│   └── ARCHITECTURE_DOCUMENT.md
-├── tests/                     # Test suite
+│   ├── ARCHITECTURE_DOCUMENT.md
+│   ├── FEATURE_ENGINE.md      # Feature catalog and V2 engine reference
+│   └── LOCAL_DEVELOPMENT.md   # Local setup, validation, and runbooks
+├── scripts/                   # Local validation and bulk backfill helpers
 ├── pyproject.toml             # Project configuration
 └── README.md                  # This file
 ```
@@ -172,7 +189,8 @@ UDRv4/
 
 - **fact_ohlcv** - Daily OHLCV price data (raw + adjusted)
 - **fact_macro** - Macroeconomic indicator observations
-- **fact_features** - Calculated feature values
+- **fact_feature** - Calculated feature values
+- **feature_diagnostic** - Feature quality metrics
 
 ### Operational Tables
 
@@ -213,34 +231,22 @@ class MyProvider(BaseProvider):
 
 ## Adding New Features
 
-1. Create a feature class inheriting from `BaseFeature`:
+The current V2 feature catalog is code-defined in
+`src/atlas/features/schema.py`. Add a `FeatureDefinition`, ensure the
+corresponding family generator in `src/atlas/features/generators.py` can compute
+the new feature name, and validate with:
 
-```python
-from atlas.features.base import BaseFeature
-
-class MyFeature(BaseFeature):
-    @property
-    def name(self) -> str:
-        return "my_feature"
-    
-    @property
-    def category(self) -> str:
-        return "custom"
-    
-    @property
-    def dependencies(self) -> list[str]:
-        return ["adj_close"]  # Required input data
-    
-    @property
-    def lookback_days(self) -> int:
-        return 20
-    
-    def calculate(self, data, target_date, parameters=None):
-        # Implementation
-        ...
+```bash
+python3 scripts/validate_local.py
 ```
 
-2. Register in `features/registry.py`
+See [docs/FEATURE_ENGINE.md](docs/FEATURE_ENGINE.md) for the V2 catalog,
+generator, transform, diagnostics, and storage contracts.
+
+Note: `config/features/registry.yaml` and the legacy `BaseFeature` registry are
+not the source of truth for `FeatureEngineV2`. Also, the nightly orchestrator's
+feature step is currently a placeholder unless it is explicitly wired to
+`FeatureEngineV2`.
 
 ## Azure Deployment
 
@@ -317,6 +323,10 @@ ATLAS organizes ~100 FRED series into three categories:
 pytest
 ```
 
+`pyproject.toml` is configured for a `tests/` directory, but this repository does
+not currently include committed tests. Use `python3 scripts/validate_local.py` as
+the local smoke check until tests are added.
+
 ### Code Quality
 
 ```bash
@@ -344,7 +354,7 @@ pre-commit run --all-files
 ### V1.2
 - REST API layer (FastAPI)
 - Advanced alerting
-- Feature versioning
+- Wire Feature Engine V2 into the nightly orchestrator
 
 ### V2.0
 - Backtesting module

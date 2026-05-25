@@ -4,7 +4,7 @@
 | Field | Value |
 |-------|-------|
 | Version | 1.0.0 |
-| Last Updated | 2026-01-26 |
+| Last Updated | 2026-05-25 |
 | Status | Implementation Ready |
 
 ---
@@ -68,7 +68,7 @@ ATLAS V1 is a **cloud-native nightly data pipeline** designed for institutional 
 │  │  │dim_source│ │dim_instr │ │fact_ohlcv│ │fact_macro│ │fact_feat │  │   │
 │  │  └──────────┘ └──────────┘ └──────────┘ └──────────┘ └──────────┘  │   │
 │  │  ┌──────────────────────────────────────────────────────────────┐  │   │
-│  │  │                    pipeline_runs                              │  │   │
+│  │  │                    pipeline_run                               │  │   │
 │  │  └──────────────────────────────────────────────────────────────┘  │   │
 │  └─────────────────────────────────────────────────────────────────────┘   │
 │  ┌─────────────────────────────────────────────────────────────────────┐   │
@@ -127,6 +127,27 @@ ATLAS V1 is a **cloud-native nightly data pipeline** designed for institutional 
 | **Secrets Management** | Credentials storage | Azure Key Vault |
 | **Monitoring** | Logs and metrics | Application Insights |
 
+### 2.3 Implementation Status Notes
+
+This document describes the target V1 architecture and the current Python
+implementation. Source-backed current behavior:
+
+- **Provider orchestration:** `PipelineOrchestrator` runs Tiingo and FRED
+  sequentially or in parallel and persists provider results. Azure Functions
+  infrastructure exists, but no function app handler exists in `src/`.
+- **Raw archive:** `storage.raw_archive` is configured and Azure Blob resources
+  are defined. Provider payloads are not currently written to Blob Storage by
+  application code.
+- **Feature calculation:** Feature Engine V2 exists under `src/atlas/features/`.
+  The pipeline's `_calculate_features` method is still a placeholder and does
+  not call `FeatureEngineV2`.
+- **Notifications:** Notification settings exist in `config/default.yaml`, but
+  no email/Slack/Teams sender is implemented in `src/`.
+- **Instruments:** Repositories and tag CLI actions exist; local validation can
+  bootstrap instruments from `ATLAS_INPUT_TEMPLATE_V1.csv`.
+  `config/instruments/universe.csv` and automatic `tags.yaml` rule application
+  are not implemented.
+
 ---
 
 ## 3. Data Model
@@ -153,7 +174,7 @@ ATLAS V1 is a **cloud-native nightly data pipeline** designed for institutional 
          │    │                    │                    │    │
          ▼    ▼                    ▼                    ▼    ▼
 ┌─────────────────┐       ┌─────────────────┐       ┌─────────────────┐
-│   fact_ohlcv    │       │  fact_features  │       │   fact_macro    │
+│   fact_ohlcv    │       │  fact_feature   │       │   fact_macro    │
 ├─────────────────┤       ├─────────────────┤       ├─────────────────┤
 │ PK,FK instrument│       │ PK,FK instrument│       │ PK,FK series_id │
 │ PK    trade_date│       │ PK    trade_date│       │ PK    obs_date  │
@@ -165,7 +186,7 @@ ATLAS V1 is a **cloud-native nightly data pipeline** designed for institutional 
 │    volume       │       └─────────────────┘
 │    adj_open     │
 │    adj_high     │       ┌─────────────────┐
-│    adj_low      │       │instrument_tags  │
+│    adj_low      │       │ instrument_tag  │
 │    adj_close    │       ├─────────────────┤
 │    adj_volume   │       │ PK,FK instrument│
 │    dividend     │       │ PK    tag       │
@@ -173,7 +194,7 @@ ATLAS V1 is a **cloud-native nightly data pipeline** designed for institutional 
 │    run_id       │       └─────────────────┘
 │    created_at   │
 └─────────────────┘       ┌─────────────────┐
-                          │  pipeline_runs  │
+                          │  pipeline_run   │
                           ├─────────────────┤
                           │ PK run_id       │
                           │    run_type     │
@@ -227,7 +248,7 @@ Master list of tradeable instruments.
 
 **Index:** UNIQUE (ticker, exchange)
 
-#### instrument_tags
+#### instrument_tag
 Many-to-many relationship for instrument tagging (portfolios, watchlists, etc.).
 
 | Column | Type | Constraints | Description |
@@ -276,7 +297,7 @@ Daily OHLCV price data with adjustments.
 | adj_volume | BIGINT | | Adjusted volume |
 | dividend | DECIMAL(18,6) | | Dividend amount |
 | split_factor | DECIMAL(18,6) | | Split ratio |
-| run_id | BIGINT | FK | Reference to pipeline_runs |
+| run_id | BIGINT | FK | Reference to pipeline_run |
 | created_at | DATETIME2 | DEFAULT GETUTCDATE() | Record creation time |
 
 **Index:** (trade_date), (instrument_id, trade_date DESC)
@@ -290,12 +311,12 @@ Macroeconomic indicator observations.
 | obs_date | DATE | PK | Observation date |
 | source_id | INT | FK | Reference to dim_source |
 | value | DECIMAL(18,6) | | Observation value |
-| run_id | BIGINT | FK | Reference to pipeline_runs |
+| run_id | BIGINT | FK | Reference to pipeline_run |
 | created_at | DATETIME2 | DEFAULT GETUTCDATE() | Record creation time |
 
 **Index:** (obs_date), (series_id, obs_date DESC)
 
-#### fact_features
+#### fact_feature
 Engineered features derived from price/macro data.
 
 | Column | Type | Constraints | Description |
@@ -305,12 +326,39 @@ Engineered features derived from price/macro data.
 | feature_name | VARCHAR(100) | PK | Feature identifier |
 | source_id | INT | FK | Reference to dim_source (origin data) |
 | value | DECIMAL(18,6) | | Calculated feature value |
-| run_id | BIGINT | FK | Reference to pipeline_runs |
+| feature_version | VARCHAR(20) | | Feature implementation/catalog version |
+| params_hash | VARCHAR(64) | | Hash of calculation parameters |
+| transform_type | VARCHAR(20) | | raw, rank, zscore, quintile, decile |
+| input_vintage | DATETIME2 | | Input data vintage used for calculation |
+| calc_timestamp | DATETIME2 | | Time the feature value was calculated |
+| run_id | BIGINT | FK | Reference to pipeline_run |
 | created_at | DATETIME2 | DEFAULT GETUTCDATE() | Record creation time |
 
 **Index:** (trade_date), (feature_name, trade_date), (instrument_id, feature_name, trade_date DESC)
 
-#### pipeline_runs
+#### feature_diagnostic
+Feature quality metrics calculated by Feature Engine V2.
+
+| Column | Type | Constraints | Description |
+|--------|------|-------------|-------------|
+| diagnostic_id | BIGINT | PK, IDENTITY | Unique diagnostic row |
+| feature_name | VARCHAR(100) | NOT NULL | Feature identifier |
+| feature_version | VARCHAR(20) | | Feature implementation/catalog version |
+| universe_scope | VARCHAR(50) | DEFAULT 'all' | Universe used for the diagnostic |
+| calc_date | DATE | NOT NULL | Feature calculation date |
+| forward_horizon | INT | NOT NULL | Forward-return horizon, e.g. 5, 21, 63, 126 |
+| ic_spearman | DECIMAL(10,6) | | Rank information coefficient |
+| ic_pearson | DECIMAL(10,6) | | Linear information coefficient |
+| hit_rate | DECIMAL(10,6) | | Directional hit rate |
+| t_stat | DECIMAL(10,6) | | Statistical significance measure |
+| n_observations | INT | | Observation count |
+| regime | VARCHAR(20) | | Regime label, default 'all' |
+| run_id | BIGINT | FK | Reference to pipeline_run |
+| created_at | DATETIME2 | DEFAULT GETUTCDATE() | Record creation time |
+
+**Index:** (feature_name, calc_date), (forward_horizon), (regime)
+
+#### pipeline_run
 Operational metadata for each pipeline execution.
 
 | Column | Type | Constraints | Description |
@@ -427,78 +475,72 @@ class ProviderRegistry:
 
 ## 5. Feature Engine Architecture
 
-### 5.1 Feature Interface
+### 5.1 Current V2 Components
 
-```python
-class BaseFeature(ABC):
-    """Abstract base class for engineered features."""
-    
-    @property
-    @abstractmethod
-    def name(self) -> str:
-        """Unique feature identifier."""
-        pass
-    
-    @property
-    @abstractmethod
-    def dependencies(self) -> List[str]:
-        """List of required input features/data."""
-        pass
-    
-    @property
-    @abstractmethod
-    def lookback_days(self) -> int:
-        """Number of historical days needed for calculation."""
-        pass
-    
-    @abstractmethod
-    def calculate(
-        self,
-        data: pd.DataFrame,
-        date: datetime.date
-    ) -> pd.Series:
-        """
-        Calculate feature values.
-        
-        Args:
-            data: Historical data including dependencies
-            date: Target calculation date
-            
-        Returns:
-            Series indexed by instrument_id with feature values
-        """
-        pass
+Feature Engine V2 is implemented as a code-defined catalog plus family-specific
+calculation modules:
+
+| Component | Source |
+|-----------|--------|
+| Feature catalog | `src/atlas/features/schema.py` |
+| Engine | `src/atlas/features/engine_v2.py` |
+| Generators | `src/atlas/features/generators.py` |
+| Panel transforms | `src/atlas/features/transforms.py` |
+| Diagnostics | `src/atlas/features/diagnostics.py` |
+| Storage | `src/atlas/storage/models.py` |
+
+Responsibilities:
+
+- **Feature catalog:** defines `FeatureDefinition`, families, variants,
+  transforms, priorities, dependencies, benchmark/factor ETF config, and IC
+  horizons.
+- **Engine:** loads historical OHLCV, benchmark, and factor data; calculates
+  enabled features; applies transforms; persists feature values and diagnostics.
+- **Generators:** implement raw feature calculations by family.
+- **Panel transforms:** apply cross-sectional rank, z-score, quintile, and
+  decile transforms for one date.
+- **Diagnostics:** compute information coefficients, hit rate, t-statistics, and
+  stability metrics.
+- **Storage:** persists values in `fact_feature` and diagnostics in
+  `feature_diagnostic`.
+
+### 5.2 Catalog Contract
+
+Each feature is a `FeatureDefinition` with:
+
+- identity: `name`, `family`, `description`
+- horizon: `lookback_days`, optional `lookback_variants`, and `min_history`
+- interpretation: `directionality`
+- outputs: `transforms` such as `raw`, `rank`, `zscore`, `quintile`, `decile`
+- dependencies: `requires` and optional `depends_on_features`
+- controls: `enabled`, `priority`, `version`, and `universe_scope`
+
+The enabled catalog currently generates 139 feature variants across momentum,
+trend, breakout, mean reversion, factor, risk, UDR/capture, and regime families.
+
+### 5.3 Feature Engine V2 Flow
+
+```text
+FEATURE_CATALOG
+    -> select enabled features by priority/family
+    -> load OHLCV history plus benchmark/factor ETF data when required
+    -> run family generator for raw values
+    -> apply panel transforms
+    -> persist fact_feature rows with versioning and lineage
+    -> calculate feature_diagnostic rows for forward horizons
 ```
 
-### 5.2 Feature Registry
+Default diagnostics use forward horizons of 5, 21, 63, and 126 days.
 
-```python
-class FeatureRegistry:
-    """Registry for feature definitions with dependency resolution."""
-    
-    def register(self, feature: BaseFeature) -> None:
-        """Register a feature."""
-        
-    def get_calculation_order(self) -> List[BaseFeature]:
-        """Return features in dependency-resolved order."""
-        
-    def calculate_all(
-        self,
-        data: pd.DataFrame,
-        date: datetime.date
-    ) -> pd.DataFrame:
-        """Calculate all features for a date."""
-```
+### 5.4 Legacy Registry Note
 
-### 5.3 Feature Categories (Extensible)
+The legacy `BaseFeature`/`FeatureRegistry` files and
+`config/features/registry.yaml` remain in the repository, but Feature Engine V2
+uses `FEATURE_CATALOG` in `schema.py` as its source of truth. Adding V2 features
+requires updating `schema.py` and the relevant generator implementation, not only
+the YAML registry.
 
-| Category | Example Features |
-|----------|-----------------|
-| **Returns** | daily_return, cumulative_return_5d, cumulative_return_21d |
-| **Volatility** | realized_vol_21d, realized_vol_63d, vol_ratio |
-| **Momentum** | rsi_14, macd, price_vs_sma_50, price_vs_sma_200 |
-| **Volume** | volume_sma_20, relative_volume, obv |
-| **Cross-sectional** | sector_relative_return, percentile_rank |
+See `docs/FEATURE_ENGINE.md` for operational details and examples.
 
 ---
 
@@ -520,7 +562,7 @@ class FeatureRegistry:
 ├─────────────────────────────────────────────────────────────────┤
 │                                                                  │
 │  1. Initialize Run                                               │
-│     └─► Create pipeline_runs record (status: running)           │
+│     └─► Create pipeline_run record (status: running)            │
 │                                                                  │
 │  2. Load Configuration                                           │
 │     └─► Read active providers, instruments, tags filter          │
@@ -529,7 +571,6 @@ class FeatureRegistry:
 │     ┌─► For each active provider:                                │
 │     │   ├─► Fetch data for target date                          │
 │     │   ├─► Validate response                                    │
-│     │   ├─► Archive raw data (Blob Storage)                      │
 │     │   └─► Return ProviderResult                                │
 │     └─► Collect all results, handle partial failures             │
 │                                                                  │
@@ -540,23 +581,23 @@ class FeatureRegistry:
 │     └─► Flag anomalies                                           │
 │                                                                  │
 │  5. Calculate Features                                           │
-│     ├─► Load historical data for lookback                        │
-│     ├─► Execute features in dependency order                     │
-│     └─► Validate feature outputs                                 │
+│     └─► Placeholder in PipelineOrchestrator today                │
 │                                                                  │
 │  6. Persist to Database                                          │
 │     ├─► Upsert fact_ohlcv                                        │
 │     ├─► Upsert fact_macro                                        │
-│     ├─► Upsert fact_features                                     │
+│     ├─► Upsert fact_feature when V2 engine is invoked            │
 │     └─► Update dimension tables if needed                        │
 │                                                                  │
 │  7. Finalize Run                                                 │
-│     ├─► Update pipeline_runs (status, counts, errors)            │
-│     ├─► Send notifications if errors                             │
+│     ├─► Update pipeline_run (status, counts, errors)             │
 │     └─► Log completion metrics                                   │
 │                                                                  │
 └─────────────────────────────────────────────────────────────────┘
 ```
+
+The target architecture includes Blob raw archiving and notification delivery,
+but those steps are not implemented in Python today.
 
 ### 6.3 Backfill Strategy
 
@@ -583,7 +624,7 @@ async def run_backfill(
 All writes use **upsert semantics** based on natural keys:
 - `fact_ohlcv`: (instrument_id, trade_date)
 - `fact_macro`: (series_id, obs_date)
-- `fact_features`: (instrument_id, trade_date, feature_name)
+- `fact_feature`: (instrument_id, trade_date, feature_name)
 
 Re-running for the same date safely updates existing records.
 
@@ -597,25 +638,26 @@ Re-running for the same date safely updates existing records.
 config/
 ├── default.yaml          # Base configuration
 ├── providers/
-│   ├── tiingo.yaml       # Tiingo-specific settings
-│   └── fred.yaml         # FRED-specific settings
+│   └── fred_series.yaml  # FRED macro series definitions
 ├── instruments/
-│   ├── universe.csv      # Full instrument list
-│   └── portfolios.yaml   # Portfolio/tag definitions
+│   └── tags.yaml         # Tag metadata and planned auto-apply rules
 ├── features/
-│   └── registry.yaml     # Feature definitions
+│   └── registry.yaml     # Legacy feature definitions; V2 uses schema.py
 └── environments/
     ├── development.yaml  # Dev overrides
-    ├── staging.yaml      # Staging overrides
     └── production.yaml   # Prod overrides
 ```
+
+`config/default.yaml` also references `config/instruments/universe.csv`; that
+CSV is not present in the repository. The local validation workflow currently
+bootstraps instruments from `ATLAS_INPUT_TEMPLATE_V1.csv`.
 
 ### 7.2 Configuration Schema
 
 ```yaml
 # default.yaml
 pipeline:
-  schedule: "0 0 * * *"  # Midnight UTC
+  schedule: "0 5 * * *"  # 5 AM UTC
   timezone: "America/New_York"
   completion_target_hour: 6  # Target completion by 6 AM ET
   
@@ -628,7 +670,7 @@ pipeline:
 
 database:
   driver: "mssql+pyodbc"
-  connection_string_env: "ATLAS_DB_CONNECTION"
+  connection_string_key: "atlas-db-connection"
   pool_size: 5
   max_overflow: 10
 
@@ -644,21 +686,27 @@ logging:
   
 notifications:
   on_failure: true
+  on_partial_success: true
+  on_anomaly: true
   channels:
-    - type: "email"
-      recipients_env: "ATLAS_ALERT_EMAILS"
+    email:
+      enabled: true
+      recipients_secret: "atlas-alert-emails"
 ```
 
 ### 7.3 Secrets Management
 
-All secrets stored in Azure Key Vault:
+In production, secrets are stored in Azure Key Vault:
 
 | Secret Name | Description |
 |-------------|-------------|
 | `tiingo-api-key` | Tiingo API key |
 | `fred-api-key` | FRED API key |
-| `db-connection-string` | Database connection string |
-| `dashboard-secret-key` | Streamlit session secret |
+| `atlas-db-connection` | Database connection string |
+| `atlas-storage-connection` | Blob Storage connection string |
+| `atlas-dashboard-users` | Dashboard users JSON for simple auth |
+| `atlas-session-secret` | Streamlit session secret |
+| `atlas-alert-emails` | Alert recipients |
 
 Application accesses via Managed Identity (no credentials in code).
 
@@ -813,8 +861,8 @@ Structured JSON logs with:
 |-----------|---------|
 | Manual run | `atlas run --date 2026-01-25` |
 | Backfill | `atlas backfill --start 2020-01-01 --end 2026-01-25` |
-| Add provider | Create provider class, register in config |
-| Add feature | Create feature class, register in config |
+| Add provider | Create provider class and wire it into `setup_providers()`/config |
+| Add feature | Add `FeatureDefinition` in `schema.py` and generator logic |
 | View logs | Azure Portal > Application Insights |
 
 ---
@@ -829,7 +877,7 @@ Structured JSON logs with:
 ### V1.2
 - API layer (FastAPI) for programmatic access
 - Advanced alerting with anomaly detection
-- Feature versioning
+- Wire Feature Engine V2 into the nightly orchestrator
 
 ### V2.0
 - Backtesting module

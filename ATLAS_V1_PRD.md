@@ -98,8 +98,9 @@ The schema should support:
 - `dim_instrument` (optional for asset universe) — ticker, exchange, asset_type, status
 - `fact_prices` / `fact_ohlcv` — daily OHLCV (raw + adjusted) keyed by instrument + date
 - `fact_macro_series` — FRED/BLS series keyed by series_id + date
-- `fact_features` — engineered features keyed by instrument + date + feature_name
-- `pipeline_runs` — run-level logs and metrics (status, duration, rows inserted/updated, error text)
+- `fact_feature` — engineered features keyed by instrument + date + feature_name
+- `feature_diagnostic` — feature quality metrics such as IC and hit rate
+- `pipeline_run` — run-level logs and metrics (status, duration, rows inserted/updated, error text)
 
 **Indexing guidelines:**
 - Composite keys on (instrument_id, trade_date) for price tables.
