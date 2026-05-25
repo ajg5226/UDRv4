@@ -44,14 +44,14 @@ def get_users() -> dict[str, str]:
             if not isinstance(users, dict) or not users:
                 raise ValueError("dashboard users must be a non-empty JSON object")
             return users
-        except json.JSONDecodeError:
+        except json.JSONDecodeError as e:
             logger.warning("Dashboard users secret is not valid JSON")
             if not _allows_development_defaults(settings.environment):
-                raise ConfigurationError("Invalid dashboard users configuration")
+                raise ConfigurationError("Invalid dashboard users configuration", cause=e) from e
         except ValueError as e:
             logger.warning("Dashboard users secret has invalid shape", error=str(e))
             if not _allows_development_defaults(settings.environment):
-                raise ConfigurationError("Invalid dashboard users configuration", cause=e)
+                raise ConfigurationError("Invalid dashboard users configuration", cause=e) from e
 
     if not _allows_development_defaults(settings.environment):
         raise ConfigurationError(
@@ -59,7 +59,7 @@ def get_users() -> dict[str, str]:
         )
     
     # Default users for development (password: atlas123)
-    default_password_hash = hashlib.sha256("atlas123".encode()).hexdigest()
+    default_password_hash = hashlib.sha256(b"atlas123").hexdigest()
     
     return {
         "admin": default_password_hash,

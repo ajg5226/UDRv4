@@ -26,7 +26,7 @@ def test_dashboard_users_fail_closed_in_production(monkeypatch):
 
 
 def test_dashboard_users_load_from_configured_secret(monkeypatch):
-    password_hash = hashlib.sha256("safe-password".encode()).hexdigest()
+    password_hash = hashlib.sha256(b"safe-password").hexdigest()
     monkeypatch.setenv("ATLAS_ENV", "production")
     monkeypatch.setenv("ATLAS_DASHBOARD_USERS", json.dumps({"admin": password_hash}))
     monkeypatch.delenv("ATLAS_KEYVAULT_URL", raising=False)
