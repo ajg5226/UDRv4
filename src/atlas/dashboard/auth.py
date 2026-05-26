@@ -8,28 +8,86 @@ from typing import Optional
 import streamlit as st
 
 from atlas.core.config import get_settings
+from atlas.core.exceptions import ConfigurationError
+from atlas.core.logging import get_logger
+from atlas.core.secrets import get_secret
+
+
+logger = get_logger(__name__)
+_DEV_ENVIRONMENTS = {"development", "dev", "local", "test", "testing"}
+
+
+def _allow_development_defaults() -> bool:
+    """Return True when hardcoded dashboard users are acceptable."""
+    return get_settings().environment.lower() in _DEV_ENVIRONMENTS
+
+
+def _parse_users_json(users_json: str, source: str) -> dict[str, str]:
+    """Parse and validate dashboard users from JSON."""
+    try:
+        users = json.loads(users_json)
+    except json.JSONDecodeError as e:
+        raise ConfigurationError(
+            "Dashboard users must be valid JSON",
+            details={"source": source},
+            cause=e,
+        ) from e
+
+    if not isinstance(users, dict) or not all(
+        isinstance(username, str)
+        and username
+        and isinstance(password_hash, str)
+        and password_hash
+        for username, password_hash in users.items()
+    ):
+        raise ConfigurationError(
+            "Dashboard users must be a JSON object of username to password hash",
+            details={"source": source},
+        )
+
+    return users
 
 
 def get_users() -> dict[str, str]:
     """
     Get user credentials.
     
-    In production, this would load from Key Vault.
-    For development, uses environment variable or defaults.
+    In production, this loads from environment or Key Vault and fails closed
+    if credentials are missing or malformed.
     
     Returns:
         Dict of username -> password_hash
     """
+    settings = get_settings()
+
     # Try environment variable first (JSON format)
     users_json = os.getenv("ATLAS_DASHBOARD_USERS")
     if users_json:
-        try:
-            return json.loads(users_json)
-        except json.JSONDecodeError:
-            pass
-    
+        return _parse_users_json(users_json, "ATLAS_DASHBOARD_USERS")
+
+    # Then try the configured secret backend.
+    try:
+        users_json = get_secret(settings.dashboard.auth.users_secret)
+    except Exception as e:
+        if not _allow_development_defaults():
+            raise ConfigurationError(
+                "Could not load dashboard users secret",
+                details={"secret": settings.dashboard.auth.users_secret},
+                cause=e,
+            ) from e
+        logger.warning("Could not load dashboard users secret", error=str(e))
+        users_json = None
+
+    if users_json:
+        return _parse_users_json(users_json, settings.dashboard.auth.users_secret)
+
+    if not _allow_development_defaults():
+        raise ConfigurationError(
+            "Dashboard users must be configured outside development",
+            details={"secret": settings.dashboard.auth.users_secret},
+        )
+
     # Default users for development (password: atlas123)
-    # In production, set ATLAS_DASHBOARD_USERS or use Key Vault
     default_password_hash = hashlib.sha256("atlas123".encode()).hexdigest()
     
     return {
@@ -98,18 +156,19 @@ def show_login() -> None:
             else:
                 st.error("Invalid username or password")
     
-    # Development hint
-    st.markdown("""
-    ---
-    
-    **Development Mode**
-    
-    Default credentials:
-    - Username: `admin` or `analyst`
-    - Password: `atlas123`
-    
-    *Set `ATLAS_DASHBOARD_USERS` environment variable with JSON credentials for production.*
-    """)
+    if _allow_development_defaults():
+        # Development hint
+        st.markdown("""
+        ---
+        
+        **Development Mode**
+        
+        Default credentials:
+        - Username: `admin` or `analyst`
+        - Password: `atlas123`
+        
+        *Set `ATLAS_DASHBOARD_USERS` environment variable with JSON credentials for production.*
+        """)
 
 
 def logout() -> None:
