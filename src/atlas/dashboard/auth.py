@@ -3,33 +3,77 @@
 import hashlib
 import json
 import os
-from typing import Optional
 
 import streamlit as st
 
 from atlas.core.config import get_settings
+from atlas.core.secrets import get_secret
+
+
+DEVELOPMENT_ENVIRONMENTS = {"development", "dev", "local", "test", "testing"}
+
+
+class AuthConfigurationError(RuntimeError):
+    """Raised when dashboard authentication is unsafe or misconfigured."""
+
+
+def _is_development_environment(environment: str) -> bool:
+    """Return whether development-only authentication defaults are allowed."""
+    return environment.lower() in DEVELOPMENT_ENVIRONMENTS
+
+
+def _parse_users_json(users_json: str, source: str) -> dict[str, str]:
+    """Parse and validate username-to-password-hash credentials."""
+    try:
+        users = json.loads(users_json)
+    except json.JSONDecodeError as exc:
+        raise AuthConfigurationError(f"Invalid dashboard user JSON in {source}") from exc
+    
+    if not isinstance(users, dict) or not users:
+        raise AuthConfigurationError(f"Dashboard users in {source} must be a non-empty object")
+    
+    if not all(isinstance(username, str) and username for username in users):
+        raise AuthConfigurationError(f"Dashboard usernames in {source} must be non-empty strings")
+    
+    if not all(isinstance(password_hash, str) and password_hash for password_hash in users.values()):
+        raise AuthConfigurationError(
+            f"Dashboard password hashes in {source} must be non-empty strings"
+        )
+    
+    return users
 
 
 def get_users() -> dict[str, str]:
     """
     Get user credentials.
     
-    In production, this would load from Key Vault.
-    For development, uses environment variable or defaults.
+    Outside development, users must be configured explicitly by environment
+    variable or the configured Key Vault secret. Development defaults are never
+    accepted in production-like environments.
     
     Returns:
         Dict of username -> password_hash
     """
-    # Try environment variable first (JSON format)
+    settings = get_settings()
+    
+    # Try the documented environment variable first (JSON format).
     users_json = os.getenv("ATLAS_DASHBOARD_USERS")
+    source = "ATLAS_DASHBOARD_USERS"
+    
+    if not users_json:
+        users_json = get_secret(settings.dashboard.auth.users_secret)
+        source = f"secret '{settings.dashboard.auth.users_secret}'"
+    
     if users_json:
-        try:
-            return json.loads(users_json)
-        except json.JSONDecodeError:
-            pass
+        return _parse_users_json(users_json, source)
+    
+    if not _is_development_environment(settings.environment):
+        raise AuthConfigurationError(
+            "Dashboard users must be configured outside development; set "
+            "ATLAS_DASHBOARD_USERS or the configured dashboard users secret"
+        )
     
     # Default users for development (password: atlas123)
-    # In production, set ATLAS_DASHBOARD_USERS or use Key Vault
     default_password_hash = hashlib.sha256("atlas123".encode()).hexdigest()
     
     return {
@@ -61,6 +105,24 @@ def verify_password(username: str, password: str) -> bool:
     
     password_hash = hash_password(password)
     return password_hash == users[username]
+
+
+def validate_auth_settings() -> None:
+    """Ensure production-like dashboard deployments cannot bypass authentication."""
+    settings = get_settings()
+    
+    if _is_development_environment(settings.environment):
+        return
+    
+    if not settings.dashboard.auth.enabled:
+        raise AuthConfigurationError("Dashboard authentication cannot be disabled outside development")
+    
+    if settings.dashboard.auth.method != "simple":
+        raise AuthConfigurationError(
+            f"Unsupported dashboard auth method: {settings.dashboard.auth.method!r}"
+        )
+    
+    get_users()
 
 
 def check_authentication() -> bool:
@@ -97,6 +159,9 @@ def show_login() -> None:
                 st.rerun()
             else:
                 st.error("Invalid username or password")
+    
+    if not _is_development_environment(get_settings().environment):
+        return
     
     # Development hint
     st.markdown("""
