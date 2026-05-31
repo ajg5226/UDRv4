@@ -27,6 +27,28 @@ from rich.table import Table
 console = Console()
 
 
+def build_macro_record(row, db_series_id: int, fred_source_id: int):
+    """Build a macro fact record from a FRED provider row."""
+    if row.get("value") is None:
+        return None
+
+    obs_date = row.get("obs_date")
+    if obs_date is None:
+        return None
+
+    if hasattr(obs_date, "date"):
+        obs_date = obs_date.date()
+    elif isinstance(obs_date, str):
+        obs_date = date.fromisoformat(obs_date[:10])
+
+    return {
+        "series_id": db_series_id,
+        "source_id": fred_source_id,
+        "obs_date": obs_date,
+        "value": row["value"],
+    }
+
+
 async def main():
     console.print("\n[bold blue]ATLAS V1 - 5 Year Historical Backfill[/bold blue]\n")
     
@@ -239,20 +261,9 @@ async def main():
                 
                 if db_series_id and not df.empty:
                     for _, row in df.iterrows():
-                        if row.get("value") is not None:
-                            obs_date = row.get("date")
-                            if obs_date is not None:
-                                if hasattr(obs_date, "date"):
-                                    obs_date = obs_date.date()
-                                elif isinstance(obs_date, str):
-                                    obs_date = date.fromisoformat(obs_date[:10])
-                                
-                                macro_records.append({
-                                    "series_id": db_series_id,
-                                    "source_id": fred_source_id,
-                                    "obs_date": obs_date,
-                                    "value": row["value"],
-                                })
+                        record = build_macro_record(row, db_series_id, fred_source_id)
+                        if record is not None:
+                            macro_records.append(record)
                 elif df.empty:
                     failed_series.append(fred_id)
                     
