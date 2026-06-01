@@ -68,7 +68,7 @@ ATLAS V1 is a **cloud-native nightly data pipeline** designed for institutional 
 │  │  │dim_source│ │dim_instr │ │fact_ohlcv│ │fact_macro│ │fact_feat │  │   │
 │  │  └──────────┘ └──────────┘ └──────────┘ └──────────┘ └──────────┘  │   │
 │  │  ┌──────────────────────────────────────────────────────────────┐  │   │
-│  │  │                    pipeline_runs                              │  │   │
+│  │  │                    pipeline_run                               │  │   │
 │  │  └──────────────────────────────────────────────────────────────┘  │   │
 │  └─────────────────────────────────────────────────────────────────────┘   │
 │  ┌─────────────────────────────────────────────────────────────────────┐   │
@@ -153,7 +153,7 @@ ATLAS V1 is a **cloud-native nightly data pipeline** designed for institutional 
          │    │                    │                    │    │
          ▼    ▼                    ▼                    ▼    ▼
 ┌─────────────────┐       ┌─────────────────┐       ┌─────────────────┐
-│   fact_ohlcv    │       │  fact_features  │       │   fact_macro    │
+│   fact_ohlcv    │       │   fact_feature  │       │   fact_macro    │
 ├─────────────────┤       ├─────────────────┤       ├─────────────────┤
 │ PK,FK instrument│       │ PK,FK instrument│       │ PK,FK series_id │
 │ PK    trade_date│       │ PK    trade_date│       │ PK    obs_date  │
@@ -165,7 +165,7 @@ ATLAS V1 is a **cloud-native nightly data pipeline** designed for institutional 
 │    volume       │       └─────────────────┘
 │    adj_open     │
 │    adj_high     │       ┌─────────────────┐
-│    adj_low      │       │instrument_tags  │
+│    adj_low      │       │ instrument_tag   │
 │    adj_close    │       ├─────────────────┤
 │    adj_volume   │       │ PK,FK instrument│
 │    dividend     │       │ PK    tag       │
@@ -173,7 +173,7 @@ ATLAS V1 is a **cloud-native nightly data pipeline** designed for institutional 
 │    run_id       │       └─────────────────┘
 │    created_at   │
 └─────────────────┘       ┌─────────────────┐
-                          │  pipeline_runs  │
+                          │  pipeline_run   │
                           ├─────────────────┤
                           │ PK run_id       │
                           │    run_type     │
@@ -227,7 +227,7 @@ Master list of tradeable instruments.
 
 **Index:** UNIQUE (ticker, exchange)
 
-#### instrument_tags
+#### instrument_tag
 Many-to-many relationship for instrument tagging (portfolios, watchlists, etc.).
 
 | Column | Type | Constraints | Description |
@@ -276,7 +276,7 @@ Daily OHLCV price data with adjustments.
 | adj_volume | BIGINT | | Adjusted volume |
 | dividend | DECIMAL(18,6) | | Dividend amount |
 | split_factor | DECIMAL(18,6) | | Split ratio |
-| run_id | BIGINT | FK | Reference to pipeline_runs |
+| run_id | BIGINT | FK | Reference to pipeline_run |
 | created_at | DATETIME2 | DEFAULT GETUTCDATE() | Record creation time |
 
 **Index:** (trade_date), (instrument_id, trade_date DESC)
@@ -290,12 +290,12 @@ Macroeconomic indicator observations.
 | obs_date | DATE | PK | Observation date |
 | source_id | INT | FK | Reference to dim_source |
 | value | DECIMAL(18,6) | | Observation value |
-| run_id | BIGINT | FK | Reference to pipeline_runs |
+| run_id | BIGINT | FK | Reference to pipeline_run |
 | created_at | DATETIME2 | DEFAULT GETUTCDATE() | Record creation time |
 
 **Index:** (obs_date), (series_id, obs_date DESC)
 
-#### fact_features
+#### fact_feature
 Engineered features derived from price/macro data.
 
 | Column | Type | Constraints | Description |
@@ -305,12 +305,12 @@ Engineered features derived from price/macro data.
 | feature_name | VARCHAR(100) | PK | Feature identifier |
 | source_id | INT | FK | Reference to dim_source (origin data) |
 | value | DECIMAL(18,6) | | Calculated feature value |
-| run_id | BIGINT | FK | Reference to pipeline_runs |
+| run_id | BIGINT | FK | Reference to pipeline_run |
 | created_at | DATETIME2 | DEFAULT GETUTCDATE() | Record creation time |
 
 **Index:** (trade_date), (feature_name, trade_date), (instrument_id, feature_name, trade_date DESC)
 
-#### pipeline_runs
+#### pipeline_run
 Operational metadata for each pipeline execution.
 
 | Column | Type | Constraints | Description |
@@ -520,7 +520,7 @@ class FeatureRegistry:
 ├─────────────────────────────────────────────────────────────────┤
 │                                                                  │
 │  1. Initialize Run                                               │
-│     └─► Create pipeline_runs record (status: running)           │
+│     └─► Create pipeline_run record (status: running)            │
 │                                                                  │
 │  2. Load Configuration                                           │
 │     └─► Read active providers, instruments, tags filter          │
@@ -547,11 +547,11 @@ class FeatureRegistry:
 │  6. Persist to Database                                          │
 │     ├─► Upsert fact_ohlcv                                        │
 │     ├─► Upsert fact_macro                                        │
-│     ├─► Upsert fact_features                                     │
+│     ├─► Upsert fact_feature                                      │
 │     └─► Update dimension tables if needed                        │
 │                                                                  │
 │  7. Finalize Run                                                 │
-│     ├─► Update pipeline_runs (status, counts, errors)            │
+│     ├─► Update pipeline_run (status, counts, errors)             │
 │     ├─► Send notifications if errors                             │
 │     └─► Log completion metrics                                   │
 │                                                                  │
@@ -583,7 +583,7 @@ async def run_backfill(
 All writes use **upsert semantics** based on natural keys:
 - `fact_ohlcv`: (instrument_id, trade_date)
 - `fact_macro`: (series_id, obs_date)
-- `fact_features`: (instrument_id, trade_date, feature_name)
+- `fact_feature`: (instrument_id, trade_date, feature_name)
 
 Re-running for the same date safely updates existing records.
 

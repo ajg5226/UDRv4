@@ -132,7 +132,8 @@ UDRv4/
 │   ├── features/              # Feature engineering
 │   │   ├── base.py            # Base feature class
 │   │   ├── registry.py        # Feature registry
-│   │   └── engine.py          # Calculation engine
+│   │   ├── engine.py          # Legacy calculation engine
+│   │   └── engine_v2.py       # Catalog-driven feature engine
 │   ├── dashboard/             # Streamlit app
 │   │   ├── app.py             # Main dashboard
 │   │   └── auth.py            # Authentication
@@ -141,7 +142,8 @@ UDRv4/
 ├── infrastructure/            # Infrastructure as code
 │   └── azure/                 # Azure Bicep templates
 ├── docs/                      # Documentation
-│   └── ARCHITECTURE_DOCUMENT.md
+│   ├── ARCHITECTURE_DOCUMENT.md
+│   └── FEATURE_ENGINE.md
 ├── tests/                     # Test suite
 ├── pyproject.toml             # Project configuration
 └── README.md                  # This file
@@ -172,7 +174,7 @@ UDRv4/
 
 - **fact_ohlcv** - Daily OHLCV price data (raw + adjusted)
 - **fact_macro** - Macroeconomic indicator observations
-- **fact_features** - Calculated feature values
+- **fact_feature** - Calculated feature values
 
 ### Operational Tables
 
@@ -213,7 +215,18 @@ class MyProvider(BaseProvider):
 
 ## Adding New Features
 
-1. Create a feature class inheriting from `BaseFeature`:
+ATLAS currently has two feature paths:
+
+- **Feature Engine V2** uses `FeatureDefinition` entries in
+  `src/atlas/features/schema.py` plus family-specific generators in
+  `src/atlas/features/generators.py`. This is the catalog-driven path exported
+  from `atlas.features`.
+- **Legacy features** use `BaseFeature`, `FeatureRegistry`, and
+  `config/features/registry.yaml`.
+
+For the V2 workflow, see [docs/FEATURE_ENGINE.md](docs/FEATURE_ENGINE.md).
+
+To add a legacy feature, create a feature class inheriting from `BaseFeature`:
 
 ```python
 from atlas.features.base import BaseFeature
@@ -240,7 +253,7 @@ class MyFeature(BaseFeature):
         ...
 ```
 
-2. Register in `features/registry.py`
+Then register it in `features/registry.py`.
 
 ## Azure Deployment
 
