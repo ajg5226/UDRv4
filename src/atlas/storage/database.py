@@ -1,9 +1,8 @@
 """Database connection and session management."""
 
 import os
-from contextlib import asynccontextmanager, contextmanager
-from functools import lru_cache
-from typing import AsyncGenerator, Generator, Optional
+from contextlib import contextmanager
+from typing import Generator, Optional
 
 from sqlalchemy import create_engine, event, text
 from sqlalchemy.engine import Engine
