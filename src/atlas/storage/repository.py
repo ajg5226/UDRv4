@@ -27,6 +27,39 @@ logger = get_logger(__name__)
 
 T = TypeVar("T", bound=Base)
 
+OHLCV_COLUMNS = [
+    "instrument_id",
+    "trade_date",
+    "open",
+    "high",
+    "low",
+    "close",
+    "volume",
+    "adj_open",
+    "adj_high",
+    "adj_low",
+    "adj_close",
+    "adj_volume",
+]
+MACRO_COLUMNS = ["series_id", "obs_date", "value"]
+
+
+def _is_missing_value(value: object) -> bool:
+    """Treat None/NaN-like provider values as missing without rejecting zero."""
+    if value is None:
+        return True
+    try:
+        return bool(pd.isna(value))
+    except (TypeError, ValueError):
+        return False
+
+
+def _float_or_none(value: object) -> Optional[float]:
+    """Convert database numeric values to floats while preserving zero."""
+    if _is_missing_value(value):
+        return None
+    return float(value)
+
 
 class BaseRepository(Generic[T]):
     """Base repository with common CRUD operations."""
@@ -288,10 +321,13 @@ class OHLCVRepository(BaseRepository[FactOHLCV]):
         end_date: Optional[date] = None,
     ) -> pd.DataFrame:
         """Get OHLCV data as a DataFrame."""
+        if instrument_ids is not None and not instrument_ids:
+            return pd.DataFrame(columns=OHLCV_COLUMNS)
+
         stmt = select(FactOHLCV)
         
         conditions = []
-        if instrument_ids:
+        if instrument_ids is not None:
             conditions.append(FactOHLCV.instrument_id.in_(instrument_ids))
         if start_date:
             conditions.append(FactOHLCV.trade_date >= start_date)
@@ -308,15 +344,15 @@ class OHLCVRepository(BaseRepository[FactOHLCV]):
             {
                 "instrument_id": r.instrument_id,
                 "trade_date": r.trade_date,
-                "open": float(r.open) if r.open else None,
-                "high": float(r.high) if r.high else None,
-                "low": float(r.low) if r.low else None,
-                "close": float(r.close) if r.close else None,
+                "open": _float_or_none(r.open),
+                "high": _float_or_none(r.high),
+                "low": _float_or_none(r.low),
+                "close": _float_or_none(r.close),
                 "volume": r.volume,
-                "adj_open": float(r.adj_open) if r.adj_open else None,
-                "adj_high": float(r.adj_high) if r.adj_high else None,
-                "adj_low": float(r.adj_low) if r.adj_low else None,
-                "adj_close": float(r.adj_close) if r.adj_close else None,
+                "adj_open": _float_or_none(r.adj_open),
+                "adj_high": _float_or_none(r.adj_high),
+                "adj_low": _float_or_none(r.adj_low),
+                "adj_close": _float_or_none(r.adj_close),
                 "adj_volume": r.adj_volume,
             }
             for r in results.scalars()
@@ -353,7 +389,7 @@ class OHLCVRepository(BaseRepository[FactOHLCV]):
             if existing:
                 # Update
                 for key, value in record.items():
-                    if hasattr(existing, key):
+                    if hasattr(existing, key) and not _is_missing_value(value):
                         setattr(existing, key, value)
                 updated += 1
             else:
@@ -412,10 +448,13 @@ class MacroRepository(BaseRepository[FactMacro]):
         end_date: Optional[date] = None,
     ) -> pd.DataFrame:
         """Get macro data as a DataFrame."""
+        if series_ids is not None and not series_ids:
+            return pd.DataFrame(columns=MACRO_COLUMNS)
+
         stmt = select(FactMacro).join(DimMacroSeries)
         
         conditions = []
-        if series_ids:
+        if series_ids is not None:
             conditions.append(FactMacro.series_id.in_(series_ids))
         if category:
             conditions.append(DimMacroSeries.category == category)
@@ -432,7 +471,7 @@ class MacroRepository(BaseRepository[FactMacro]):
             {
                 "series_id": r.series_id,
                 "obs_date": r.obs_date,
-                "value": float(r.value) if r.value else None,
+                "value": _float_or_none(r.value),
             }
             for r in results.scalars()
         ]
@@ -497,11 +536,16 @@ class FeatureRepository(BaseRepository[FactFeature]):
         instrument_ids: Optional[list[int]] = None,
     ) -> pd.DataFrame:
         """Get all features for a date as a DataFrame (pivoted by feature name)."""
+        if feature_names is not None and not feature_names:
+            return pd.DataFrame()
+        if instrument_ids is not None and not instrument_ids:
+            return pd.DataFrame()
+
         stmt = select(FactFeature).where(FactFeature.trade_date == trade_date)
         
-        if feature_names:
+        if feature_names is not None:
             stmt = stmt.where(FactFeature.feature_name.in_(feature_names))
-        if instrument_ids:
+        if instrument_ids is not None:
             stmt = stmt.where(FactFeature.instrument_id.in_(instrument_ids))
         
         results = list(self.session.scalars(stmt))
@@ -514,7 +558,7 @@ class FeatureRepository(BaseRepository[FactFeature]):
                 "instrument_id": r.instrument_id,
                 "trade_date": r.trade_date,
                 "feature_name": r.feature_name,
-                "value": float(r.value) if r.value else None,
+                "value": _float_or_none(r.value),
             }
             for r in results
         ]
@@ -553,7 +597,9 @@ class FeatureRepository(BaseRepository[FactFeature]):
             )
 
             if existing:
-                existing.value = record["value"]
+                for key, value in record.items():
+                    if hasattr(existing, key):
+                        setattr(existing, key, value)
                 updated += 1
             else:
                 self.session.add(FactFeature(**record))

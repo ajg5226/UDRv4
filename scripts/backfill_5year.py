@@ -27,6 +27,40 @@ from rich.table import Table
 console = Console()
 
 
+def _coerce_row_date(row, *column_names):
+    """Read and normalize the first available date-like column from a provider row."""
+    for column_name in column_names:
+        row_date = row.get(column_name)
+        if row_date is None:
+            continue
+        if hasattr(row_date, "date"):
+            return row_date.date()
+        if isinstance(row_date, str):
+            return date.fromisoformat(row_date[:10])
+        return row_date
+    return None
+
+
+def build_macro_records(df, db_series_id: int, source_id: int) -> list[dict]:
+    """Build FactMacro records from a FRED DataFrame."""
+    records = []
+    if not db_series_id or df.empty:
+        return records
+
+    for _, row in df.iterrows():
+        if row.get("value") is not None:
+            obs_date = _coerce_row_date(row, "obs_date", "date")
+            if obs_date is not None:
+                records.append({
+                    "series_id": db_series_id,
+                    "source_id": source_id,
+                    "obs_date": obs_date,
+                    "value": row["value"],
+                })
+
+    return records
+
+
 async def main():
     console.print("\n[bold blue]ATLAS V1 - 5 Year Historical Backfill[/bold blue]\n")
     
@@ -238,21 +272,7 @@ async def main():
                 db_series_id = series_to_id.get(fred_id)
                 
                 if db_series_id and not df.empty:
-                    for _, row in df.iterrows():
-                        if row.get("value") is not None:
-                            obs_date = row.get("date")
-                            if obs_date is not None:
-                                if hasattr(obs_date, "date"):
-                                    obs_date = obs_date.date()
-                                elif isinstance(obs_date, str):
-                                    obs_date = date.fromisoformat(obs_date[:10])
-                                
-                                macro_records.append({
-                                    "series_id": db_series_id,
-                                    "source_id": fred_source_id,
-                                    "obs_date": obs_date,
-                                    "value": row["value"],
-                                })
+                    macro_records.extend(build_macro_records(df, db_series_id, fred_source_id))
                 elif df.empty:
                     failed_series.append(fred_id)
                     
