@@ -13,6 +13,7 @@ import asyncio
 import sys
 from datetime import date, timedelta
 from pathlib import Path
+from typing import Any, Optional
 
 # Add src to path
 sys.path.insert(0, str(Path(__file__).parent.parent / "src"))
@@ -27,11 +28,52 @@ from rich.table import Table
 console = Console()
 
 
+def _coerce_date(value: Any) -> Optional[date]:
+    """Normalize date-like provider values to a date."""
+    if value is None:
+        return None
+    if hasattr(value, "date"):
+        return value.date()
+    if isinstance(value, str):
+        return date.fromisoformat(value[:10])
+    return value
+
+
+def _is_missing(value: Any) -> bool:
+    """Return True for None and NaN-like scalar values."""
+    if value is None:
+        return True
+    try:
+        return bool(value != value)
+    except (TypeError, ValueError):
+        return False
+
+
+def _build_macro_record(row: Any, series_id: int, source_id: int) -> Optional[dict[str, Any]]:
+    """Build a persistable macro record from a FRED provider row."""
+    value = row.get("value")
+    if _is_missing(value):
+        return None
+
+    obs_date = row.get("obs_date")
+    if obs_date is None:
+        obs_date = row.get("date")
+    obs_date = _coerce_date(obs_date)
+    if obs_date is None:
+        return None
+
+    return {
+        "series_id": series_id,
+        "source_id": source_id,
+        "obs_date": obs_date,
+        "value": value,
+    }
+
+
 async def main():
     console.print("\n[bold blue]ATLAS V1 - 5 Year Historical Backfill[/bold blue]\n")
     
     # Import after path setup
-    from atlas.core.config import get_settings
     from atlas.core.logging import setup_logging
     from atlas.storage.database import get_database
     from atlas.storage.repository import (
@@ -46,7 +88,6 @@ async def main():
     from atlas.providers.fred import FredProvider
     
     setup_logging()
-    settings = get_settings()
     
     # Date range
     end_date = date.today() - timedelta(days=1)  # Yesterday
@@ -239,20 +280,9 @@ async def main():
                 
                 if db_series_id and not df.empty:
                     for _, row in df.iterrows():
-                        if row.get("value") is not None:
-                            obs_date = row.get("date")
-                            if obs_date is not None:
-                                if hasattr(obs_date, "date"):
-                                    obs_date = obs_date.date()
-                                elif isinstance(obs_date, str):
-                                    obs_date = date.fromisoformat(obs_date[:10])
-                                
-                                macro_records.append({
-                                    "series_id": db_series_id,
-                                    "source_id": fred_source_id,
-                                    "obs_date": obs_date,
-                                    "value": row["value"],
-                                })
+                        macro_record = _build_macro_record(row, db_series_id, fred_source_id)
+                        if macro_record is not None:
+                            macro_records.append(macro_record)
                 elif df.empty:
                     failed_series.append(fred_id)
                     
