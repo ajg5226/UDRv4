@@ -3,7 +3,9 @@
 from __future__ import annotations
 
 import json
+import importlib.util
 from datetime import date, datetime
+from pathlib import Path
 from types import SimpleNamespace
 
 import pytest
@@ -20,7 +22,14 @@ from atlas.storage.repository import (
     OHLCVRepository,
     SourceRepository,
 )
-from scripts.backfill_5year import _build_macro_record
+
+
+_BACKFILL_PATH = Path(__file__).resolve().parents[1] / "scripts" / "backfill_5year.py"
+_BACKFILL_SPEC = importlib.util.spec_from_file_location("backfill_5year", _BACKFILL_PATH)
+_backfill_module = importlib.util.module_from_spec(_BACKFILL_SPEC)
+assert _BACKFILL_SPEC.loader is not None
+_BACKFILL_SPEC.loader.exec_module(_backfill_module)
+_build_macro_record = _backfill_module._build_macro_record
 
 
 @pytest.fixture(autouse=True)
