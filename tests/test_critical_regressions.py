@@ -2,8 +2,8 @@
 
 from __future__ import annotations
 
-import json
 import importlib.util
+import json
 from datetime import date, datetime
 from pathlib import Path
 from types import SimpleNamespace
@@ -22,7 +22,6 @@ from atlas.storage.repository import (
     OHLCVRepository,
     SourceRepository,
 )
-
 
 _BACKFILL_PATH = Path(__file__).resolve().parents[1] / "scripts" / "backfill_5year.py"
 _BACKFILL_SPEC = importlib.util.spec_from_file_location("backfill_5year", _BACKFILL_PATH)
