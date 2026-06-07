@@ -10,7 +10,7 @@ from sqlalchemy.engine import Engine
 from sqlalchemy.orm import Session, sessionmaker
 from sqlalchemy.pool import QueuePool
 
-from atlas.core.config import get_settings
+from atlas.core.config import get_settings, is_development_environment
 from atlas.core.exceptions import DatabaseError
 from atlas.core.logging import get_logger
 from atlas.storage.models import Base
@@ -41,6 +41,8 @@ class Database:
 
     def _get_connection_string(self) -> str:
         """Get connection string from environment or Key Vault."""
+        settings = get_settings()
+
         # First try environment variable
         conn_str = os.getenv("ATLAS_DB_CONNECTION")
         if conn_str:
@@ -49,12 +51,17 @@ class Database:
         # Try to load from Key Vault (for Azure deployment)
         try:
             from atlas.core.secrets import get_secret
-            settings = get_settings()
             conn_str = get_secret(settings.database.connection_string_key)
             if conn_str:
                 return conn_str
         except Exception as e:
             logger.warning("Could not load connection string from Key Vault", error=str(e))
+
+        if not is_development_environment(settings.environment):
+            raise DatabaseError(
+                "Database connection string is required outside development environments",
+                operation="connect",
+            )
 
         # Fall back to local SQLite for development
         logger.warning("Using local SQLite database (development mode)")
