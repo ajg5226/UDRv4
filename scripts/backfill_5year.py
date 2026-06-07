@@ -27,6 +27,40 @@ from rich.table import Table
 console = Console()
 
 
+def _has_value(value):
+    """Return False for None/NaN-like scalar values from provider rows."""
+    return value is not None and value == value
+
+
+def _coerce_obs_date(obs_date):
+    """Normalize date-like values from FRED rows."""
+    if obs_date is None:
+        return None
+    if hasattr(obs_date, "date"):
+        return obs_date.date()
+    if isinstance(obs_date, str):
+        return date.fromisoformat(obs_date[:10])
+    return obs_date
+
+
+def _build_macro_record(row, db_series_id, fred_source_id):
+    """Build a macro fact record from a FRED provider row."""
+    value = row.get("value")
+    if not _has_value(value):
+        return None
+
+    obs_date = _coerce_obs_date(row.get("obs_date", row.get("date")))
+    if obs_date is None:
+        return None
+
+    return {
+        "series_id": db_series_id,
+        "source_id": fred_source_id,
+        "obs_date": obs_date,
+        "value": value,
+    }
+
+
 async def main():
     console.print("\n[bold blue]ATLAS V1 - 5 Year Historical Backfill[/bold blue]\n")
     
@@ -239,20 +273,9 @@ async def main():
                 
                 if db_series_id and not df.empty:
                     for _, row in df.iterrows():
-                        if row.get("value") is not None:
-                            obs_date = row.get("date")
-                            if obs_date is not None:
-                                if hasattr(obs_date, "date"):
-                                    obs_date = obs_date.date()
-                                elif isinstance(obs_date, str):
-                                    obs_date = date.fromisoformat(obs_date[:10])
-                                
-                                macro_records.append({
-                                    "series_id": db_series_id,
-                                    "source_id": fred_source_id,
-                                    "obs_date": obs_date,
-                                    "value": row["value"],
-                                })
+                        record = _build_macro_record(row, db_series_id, fred_source_id)
+                        if record is not None:
+                            macro_records.append(record)
                 elif df.empty:
                     failed_series.append(fred_id)
                     
