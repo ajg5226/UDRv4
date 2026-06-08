@@ -4,7 +4,7 @@
 | Field | Value |
 |-------|-------|
 | Version | 1.0.0 |
-| Last Updated | 2026-01-26 |
+| Last Updated | 2026-06-08 |
 | Status | Implementation Ready |
 
 ---
@@ -68,7 +68,7 @@ ATLAS V1 is a **cloud-native nightly data pipeline** designed for institutional 
 │  │  │dim_source│ │dim_instr │ │fact_ohlcv│ │fact_macro│ │fact_feat │  │   │
 │  │  └──────────┘ └──────────┘ └──────────┘ └──────────┘ └──────────┘  │   │
 │  │  ┌──────────────────────────────────────────────────────────────┐  │   │
-│  │  │                    pipeline_runs                              │  │   │
+│  │  │                    pipeline_run                               │  │   │
 │  │  └──────────────────────────────────────────────────────────────┘  │   │
 │  └─────────────────────────────────────────────────────────────────────┘   │
 │  ┌─────────────────────────────────────────────────────────────────────┐   │
@@ -153,7 +153,7 @@ ATLAS V1 is a **cloud-native nightly data pipeline** designed for institutional 
          │    │                    │                    │    │
          ▼    ▼                    ▼                    ▼    ▼
 ┌─────────────────┐       ┌─────────────────┐       ┌─────────────────┐
-│   fact_ohlcv    │       │  fact_features  │       │   fact_macro    │
+│   fact_ohlcv    │       │  fact_feature   │       │   fact_macro    │
 ├─────────────────┤       ├─────────────────┤       ├─────────────────┤
 │ PK,FK instrument│       │ PK,FK instrument│       │ PK,FK series_id │
 │ PK    trade_date│       │ PK    trade_date│       │ PK    obs_date  │
@@ -165,7 +165,7 @@ ATLAS V1 is a **cloud-native nightly data pipeline** designed for institutional 
 │    volume       │       └─────────────────┘
 │    adj_open     │
 │    adj_high     │       ┌─────────────────┐
-│    adj_low      │       │instrument_tags  │
+│    adj_low      │       │ instrument_tag  │
 │    adj_close    │       ├─────────────────┤
 │    adj_volume   │       │ PK,FK instrument│
 │    dividend     │       │ PK    tag       │
@@ -173,7 +173,7 @@ ATLAS V1 is a **cloud-native nightly data pipeline** designed for institutional 
 │    run_id       │       └─────────────────┘
 │    created_at   │
 └─────────────────┘       ┌─────────────────┐
-                          │  pipeline_runs  │
+                          │  pipeline_run   │
                           ├─────────────────┤
                           │ PK run_id       │
                           │    run_type     │
@@ -227,7 +227,7 @@ Master list of tradeable instruments.
 
 **Index:** UNIQUE (ticker, exchange)
 
-#### instrument_tags
+#### instrument_tag
 Many-to-many relationship for instrument tagging (portfolios, watchlists, etc.).
 
 | Column | Type | Constraints | Description |
@@ -276,7 +276,7 @@ Daily OHLCV price data with adjustments.
 | adj_volume | BIGINT | | Adjusted volume |
 | dividend | DECIMAL(18,6) | | Dividend amount |
 | split_factor | DECIMAL(18,6) | | Split ratio |
-| run_id | BIGINT | FK | Reference to pipeline_runs |
+| run_id | BIGINT | FK | Reference to pipeline_run |
 | created_at | DATETIME2 | DEFAULT GETUTCDATE() | Record creation time |
 
 **Index:** (trade_date), (instrument_id, trade_date DESC)
@@ -290,12 +290,12 @@ Macroeconomic indicator observations.
 | obs_date | DATE | PK | Observation date |
 | source_id | INT | FK | Reference to dim_source |
 | value | DECIMAL(18,6) | | Observation value |
-| run_id | BIGINT | FK | Reference to pipeline_runs |
+| run_id | BIGINT | FK | Reference to pipeline_run |
 | created_at | DATETIME2 | DEFAULT GETUTCDATE() | Record creation time |
 
 **Index:** (obs_date), (series_id, obs_date DESC)
 
-#### fact_features
+#### fact_feature
 Engineered features derived from price/macro data.
 
 | Column | Type | Constraints | Description |
@@ -305,12 +305,17 @@ Engineered features derived from price/macro data.
 | feature_name | VARCHAR(100) | PK | Feature identifier |
 | source_id | INT | FK | Reference to dim_source (origin data) |
 | value | DECIMAL(18,6) | | Calculated feature value |
-| run_id | BIGINT | FK | Reference to pipeline_runs |
+| feature_version | VARCHAR(20) | | Feature definition version |
+| params_hash | VARCHAR(64) | | Hash of feature parameters |
+| transform_type | VARCHAR(20) | | raw, rank, zscore, quintile, or decile |
+| input_vintage | DATETIME2 | | Input data vintage used for calculation |
+| calc_timestamp | DATETIME2 | | Feature calculation timestamp |
+| run_id | BIGINT | FK | Reference to pipeline_run |
 | created_at | DATETIME2 | DEFAULT GETUTCDATE() | Record creation time |
 
-**Index:** (trade_date), (feature_name, trade_date), (instrument_id, feature_name, trade_date DESC)
+**Index:** (trade_date), (feature_name, trade_date), (instrument_id, feature_name, trade_date DESC), (feature_name, feature_version)
 
-#### pipeline_runs
+#### pipeline_run
 Operational metadata for each pipeline execution.
 
 | Column | Type | Constraints | Description |
@@ -427,78 +432,73 @@ class ProviderRegistry:
 
 ## 5. Feature Engine Architecture
 
-### 5.1 Feature Interface
+The implemented feature engine is Feature Engine V2, a schema-driven system with
+Python feature definitions, family-specific generators, cross-sectional
+transforms, and persistence metadata. See `docs/FEATURE_ENGINE.md` for the
+developer workflow and operational constraints.
+
+### 5.1 V2 Schema
+
+Feature definitions live in `src/atlas/features/schema.py` as
+`FeatureDefinition` entries registered in `FEATURE_CATALOG`.
 
 ```python
-class BaseFeature(ABC):
-    """Abstract base class for engineered features."""
-    
-    @property
-    @abstractmethod
-    def name(self) -> str:
-        """Unique feature identifier."""
-        pass
-    
-    @property
-    @abstractmethod
-    def dependencies(self) -> List[str]:
-        """List of required input features/data."""
-        pass
-    
-    @property
-    @abstractmethod
-    def lookback_days(self) -> int:
-        """Number of historical days needed for calculation."""
-        pass
-    
-    @abstractmethod
-    def calculate(
-        self,
-        data: pd.DataFrame,
-        date: datetime.date
-    ) -> pd.Series:
-        """
-        Calculate feature values.
-        
-        Args:
-            data: Historical data including dependencies
-            date: Target calculation date
-            
-        Returns:
-            Series indexed by instrument_id with feature values
-        """
-        pass
+FeatureDefinition(
+    name="mom_ts",
+    family=FeatureFamily.MOMENTUM,
+    description="Time-series momentum (cumulative return)",
+    horizon_family=HorizonFamily.MULTI,
+    lookback_days=21,
+    min_history=252,
+    lookback_variants=[21, 63, 126, 252],
+    transforms=[TransformType.RAW, TransformType.RANK, TransformType.ZSCORE],
+    requires=[DataRequirement.OHLCV],
+)
 ```
 
-### 5.2 Feature Registry
+Each definition declares identity, horizon, minimum history, lookback variants,
+cross-sectional transforms, data requirements, universe scope, priority, and
+version. V2 does not load feature definitions from
+`config/features/registry.yaml`; that YAML file belongs to the legacy feature
+path.
 
-```python
-class FeatureRegistry:
-    """Registry for feature definitions with dependency resolution."""
-    
-    def register(self, feature: BaseFeature) -> None:
-        """Register a feature."""
-        
-    def get_calculation_order(self) -> List[BaseFeature]:
-        """Return features in dependency-resolved order."""
-        
-    def calculate_all(
-        self,
-        data: pd.DataFrame,
-        date: datetime.date
-    ) -> pd.DataFrame:
-        """Calculate all features for a date."""
+### 5.2 Calculation Flow
+
+```
+FeatureEngineV2.calculate(target_date)
+        │
+        ├─ Select enabled catalog features up to max_priority
+        ├─ Load OHLCV history through OHLCVRepository
+        ├─ Load benchmark and factor ETF history when required
+        ├─ Dispatch raw calculations to family generators
+        ├─ Apply rank, z-score, quintile, and decile transforms
+        └─ Upsert values into fact_feature with version metadata
 ```
 
-### 5.3 Feature Categories (Extensible)
+The generator registry maps feature families to calculation implementations:
 
 | Category | Example Features |
 |----------|-----------------|
-| **Returns** | daily_return, cumulative_return_5d, cumulative_return_21d |
-| **Volatility** | realized_vol_21d, realized_vol_63d, vol_ratio |
-| **Momentum** | rsi_14, macd, price_vs_sma_50, price_vs_sma_200 |
-| **Volume** | volume_sma_20, relative_volume, obv |
-| **Cross-sectional** | sector_relative_return, percentile_rank |
+| **Momentum** | mom_ts, mom_risk_adj, mom_intermediate |
+| **Trend** | trend_slope, trend_adx |
+| **Breakout** | breakout_high, breakout_volume |
+| **Mean Reversion** | mr_rsi, mr_zscore |
+| **Factor** | factor_beta, factor_residual |
+| **Risk** | risk_volatility, risk_drawdown |
+| **UDR** | upside/downside return signals |
+| **Regime** | benchmark and market-state signals |
+
+### 5.3 Integration Status
+
+Feature Engine V2 can be run directly through `FeatureEngineV2.calculate()` or
+the `atlas.features.calculate_features()` convenience wrapper. The persisted
+table is `fact_feature`, and `feature_diagnostic` exists for diagnostic metrics.
+
+The nightly pipeline integration is not complete: `atlas run` and
+`atlas backfill` reach `PipelineOrchestrator._calculate_features()`, which
+currently logs a placeholder instead of calling V2. Diagnostics persistence is
+also deferred in `FeatureEngineV2._calculate_and_store_diagnostics()` because it
+requires future returns.
 
 ---
 
@@ -520,7 +520,7 @@ class FeatureRegistry:
 ├─────────────────────────────────────────────────────────────────┤
 │                                                                  │
 │  1. Initialize Run                                               │
-│     └─► Create pipeline_runs record (status: running)           │
+│     └─► Create pipeline_run record (status: running)            │
 │                                                                  │
 │  2. Load Configuration                                           │
 │     └─► Read active providers, instruments, tags filter          │
@@ -547,11 +547,11 @@ class FeatureRegistry:
 │  6. Persist to Database                                          │
 │     ├─► Upsert fact_ohlcv                                        │
 │     ├─► Upsert fact_macro                                        │
-│     ├─► Upsert fact_features                                     │
+│     ├─► Upsert fact_feature                                      │
 │     └─► Update dimension tables if needed                        │
 │                                                                  │
 │  7. Finalize Run                                                 │
-│     ├─► Update pipeline_runs (status, counts, errors)            │
+│     ├─► Update pipeline_run (status, counts, errors)             │
 │     ├─► Send notifications if errors                             │
 │     └─► Log completion metrics                                   │
 │                                                                  │
@@ -583,7 +583,7 @@ async def run_backfill(
 All writes use **upsert semantics** based on natural keys:
 - `fact_ohlcv`: (instrument_id, trade_date)
 - `fact_macro`: (series_id, obs_date)
-- `fact_features`: (instrument_id, trade_date, feature_name)
+- `fact_feature`: (instrument_id, trade_date, feature_name)
 
 Re-running for the same date safely updates existing records.
 
