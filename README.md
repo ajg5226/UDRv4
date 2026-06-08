@@ -141,7 +141,8 @@ UDRv4/
 ├── infrastructure/            # Infrastructure as code
 │   └── azure/                 # Azure Bicep templates
 ├── docs/                      # Documentation
-│   └── ARCHITECTURE_DOCUMENT.md
+│   ├── ARCHITECTURE_DOCUMENT.md
+│   └── FEATURE_ENGINE.md
 ├── tests/                     # Test suite
 ├── pyproject.toml             # Project configuration
 └── README.md                  # This file
@@ -172,7 +173,7 @@ UDRv4/
 
 - **fact_ohlcv** - Daily OHLCV price data (raw + adjusted)
 - **fact_macro** - Macroeconomic indicator observations
-- **fact_features** - Calculated feature values
+- **fact_feature** - Calculated feature values
 
 ### Operational Tables
 
@@ -213,34 +214,52 @@ class MyProvider(BaseProvider):
 
 ## Adding New Features
 
-1. Create a feature class inheriting from `BaseFeature`:
+ATLAS contains a legacy class-based feature framework and the newer schema-driven
+Feature Engine V2. For new work, use V2 and treat
+`src/atlas/features/schema.py` as the source of truth. See
+[`docs/FEATURE_ENGINE.md`](docs/FEATURE_ENGINE.md) for the full workflow,
+standalone usage, data prerequisites, and current integration status.
+
+1. Add or update a `FeatureDefinition` in `src/atlas/features/schema.py`:
 
 ```python
-from atlas.features.base import BaseFeature
+from atlas.features.schema import (
+    DataRequirement,
+    Directionality,
+    FeatureDefinition,
+    FeatureFamily,
+    HorizonFamily,
+    TransformType,
+    register_feature,
+)
 
-class MyFeature(BaseFeature):
-    @property
-    def name(self) -> str:
-        return "my_feature"
-    
-    @property
-    def category(self) -> str:
-        return "custom"
-    
-    @property
-    def dependencies(self) -> list[str]:
-        return ["adj_close"]  # Required input data
-    
-    @property
-    def lookback_days(self) -> int:
-        return 20
-    
-    def calculate(self, data, target_date, parameters=None):
-        # Implementation
-        ...
+register_feature(FeatureDefinition(
+    name="my_signal",
+    family=FeatureFamily.MOMENTUM,
+    description="Example 21-day signal",
+    horizon_family=HorizonFamily.FAST,
+    lookback_days=21,
+    min_history=63,
+    lookback_variants=[21, 63],
+    transforms=[TransformType.RAW, TransformType.RANK],
+    requires=[DataRequirement.OHLCV],
+    directionality=Directionality.HIGHER_BETTER,
+))
 ```
 
-2. Register in `features/registry.py`
+2. Implement the raw calculation in the matching family generator in
+   `src/atlas/features/generators.py` if the generator does not already handle
+   the feature name.
+3. Validate the schema, generators, and transforms:
+
+```bash
+python scripts/validate_local.py
+```
+
+The V2 engine can be called directly with `FeatureEngineV2.calculate()` or the
+`atlas.features.calculate_features()` convenience wrapper. The nightly
+orchestrator's feature step is currently a placeholder, so `atlas run` and
+`atlas backfill` do not invoke V2 feature calculation yet.
 
 ## Azure Deployment
 
