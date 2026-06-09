@@ -1,8 +1,6 @@
 """Main Streamlit dashboard application for ATLAS."""
 
-import os
-from datetime import date, datetime, timedelta
-from typing import Optional
+from datetime import date, timedelta
 
 import pandas as pd
 import streamlit as st
@@ -16,7 +14,8 @@ st.set_page_config(
 )
 
 from atlas.dashboard.auth import check_authentication, show_login
-from atlas.core.config import get_settings
+from atlas.core.config import get_settings, is_development_environment
+from atlas.core.exceptions import ConfigurationError
 from atlas.core.logging import setup_logging
 from atlas.storage.database import get_database
 from atlas.storage.repository import (
@@ -34,6 +33,12 @@ setup_logging(level="WARNING", format_type="text")
 def main() -> None:
     """Main dashboard entry point."""
     settings = get_settings()
+
+    if (
+        not is_development_environment(settings.environment)
+        and not settings.dashboard.auth.enabled
+    ):
+        raise ConfigurationError("Dashboard authentication must be enabled in production")
     
     # Authentication
     if settings.dashboard.auth.enabled:
