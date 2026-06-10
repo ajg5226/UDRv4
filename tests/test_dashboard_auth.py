@@ -2,7 +2,7 @@ import json
 
 import pytest
 
-from atlas.core.config import get_settings
+from atlas.core.config import Settings, get_settings
 from atlas.core.exceptions import ConfigurationError
 from atlas.dashboard import auth
 
@@ -71,21 +71,15 @@ def test_development_keeps_default_dashboard_users(
 
 
 def test_production_rejects_disabled_dashboard_auth(
-    monkeypatch: pytest.MonkeyPatch,
 ) -> None:
-    monkeypatch.setenv("ATLAS_ENV", "production")
-    monkeypatch.setenv("ATLAS_DASHBOARD__AUTH__ENABLED", "false")
-    get_settings.cache_clear()
+    settings = Settings(ATLAS_ENV="production", dashboard={"auth": {"enabled": False}})
 
     with pytest.raises(ConfigurationError, match="cannot be disabled"):
-        auth.dashboard_auth_enabled()
+        auth.dashboard_auth_enabled(settings)
 
 
 def test_development_allows_disabled_dashboard_auth(
-    monkeypatch: pytest.MonkeyPatch,
 ) -> None:
-    monkeypatch.setenv("ATLAS_ENV", "development")
-    monkeypatch.setenv("ATLAS_DASHBOARD__AUTH__ENABLED", "false")
-    get_settings.cache_clear()
+    settings = Settings(ATLAS_ENV="development", dashboard={"auth": {"enabled": False}})
 
-    assert auth.dashboard_auth_enabled() is False
+    assert auth.dashboard_auth_enabled(settings) is False
