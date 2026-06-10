@@ -15,9 +15,9 @@ st.set_page_config(
     initial_sidebar_state="expanded",
 )
 
-from atlas.dashboard.auth import check_authentication, show_login
 from atlas.core.config import get_settings
 from atlas.core.logging import setup_logging
+from atlas.dashboard.auth import check_authentication, dashboard_auth_enabled, show_login
 from atlas.storage.database import get_database
 from atlas.storage.repository import (
     InstrumentRepository,
@@ -36,7 +36,7 @@ def main() -> None:
     settings = get_settings()
     
     # Authentication
-    if settings.dashboard.auth.enabled:
+    if dashboard_auth_enabled(settings):
         if not check_authentication():
             show_login()
             return
