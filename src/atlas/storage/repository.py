@@ -28,6 +28,17 @@ logger = get_logger(__name__)
 T = TypeVar("T", bound=Base)
 
 
+def _is_missing_value(value: object) -> bool:
+    """Return True for None and pandas/NumPy missing scalar values."""
+    if value is None:
+        return True
+
+    try:
+        return bool(pd.isna(value))
+    except (TypeError, ValueError):
+        return False
+
+
 class BaseRepository(Generic[T]):
     """Base repository with common CRUD operations."""
 
@@ -353,7 +364,7 @@ class OHLCVRepository(BaseRepository[FactOHLCV]):
             if existing:
                 # Update
                 for key, value in record.items():
-                    if hasattr(existing, key):
+                    if hasattr(existing, key) and not _is_missing_value(value):
                         setattr(existing, key, value)
                 updated += 1
             else:

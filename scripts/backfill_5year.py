@@ -27,6 +27,28 @@ from rich.table import Table
 console = Console()
 
 
+def build_macro_records(df, series_to_id: dict[str, int], fred_source_id: int) -> list[dict]:
+    """Build database-ready macro records from FRED provider rows."""
+    macro_records = []
+    for _, row in df.iterrows():
+        if row.get("value") is not None:
+            obs_date = row.get("obs_date")
+            if obs_date is not None:
+                if hasattr(obs_date, "date"):
+                    obs_date = obs_date.date()
+                elif isinstance(obs_date, str):
+                    obs_date = date.fromisoformat(obs_date[:10])
+
+                macro_records.append({
+                    "series_id": series_to_id[row["fred_id"]],
+                    "source_id": fred_source_id,
+                    "obs_date": obs_date,
+                    "value": row["value"],
+                })
+
+    return macro_records
+
+
 async def main():
     console.print("\n[bold blue]ATLAS V1 - 5 Year Historical Backfill[/bold blue]\n")
     
@@ -238,21 +260,13 @@ async def main():
                 db_series_id = series_to_id.get(fred_id)
                 
                 if db_series_id and not df.empty:
-                    for _, row in df.iterrows():
-                        if row.get("value") is not None:
-                            obs_date = row.get("date")
-                            if obs_date is not None:
-                                if hasattr(obs_date, "date"):
-                                    obs_date = obs_date.date()
-                                elif isinstance(obs_date, str):
-                                    obs_date = date.fromisoformat(obs_date[:10])
-                                
-                                macro_records.append({
-                                    "series_id": db_series_id,
-                                    "source_id": fred_source_id,
-                                    "obs_date": obs_date,
-                                    "value": row["value"],
-                                })
+                    macro_records.extend(
+                        build_macro_records(
+                            df,
+                            {fred_id: db_series_id},
+                            fred_source_id,
+                        )
+                    )
                 elif df.empty:
                     failed_series.append(fred_id)
                     

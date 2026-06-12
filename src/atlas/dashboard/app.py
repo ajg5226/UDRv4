@@ -15,9 +15,14 @@ st.set_page_config(
     initial_sidebar_state="expanded",
 )
 
-from atlas.dashboard.auth import check_authentication, show_login
 from atlas.core.config import get_settings
+from atlas.core.exceptions import ConfigurationError
 from atlas.core.logging import setup_logging
+from atlas.dashboard.auth import (
+    check_authentication,
+    ensure_dashboard_auth_configured,
+    show_login,
+)
 from atlas.storage.database import get_database
 from atlas.storage.repository import (
     InstrumentRepository,
@@ -34,6 +39,11 @@ setup_logging(level="WARNING", format_type="text")
 def main() -> None:
     """Main dashboard entry point."""
     settings = get_settings()
+    try:
+        ensure_dashboard_auth_configured(settings)
+    except ConfigurationError:
+        st.error("Dashboard authentication is not safely configured. Contact an administrator.")
+        return
     
     # Authentication
     if settings.dashboard.auth.enabled:
