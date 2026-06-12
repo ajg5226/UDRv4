@@ -165,7 +165,9 @@ class PipelineOrchestrator:
             providers=config.providers,
             tags=config.tags,
         )
-        
+
+        run_id: Optional[int] = None
+
         try:
             # Create run record
             with self._db.session() as session:
@@ -184,7 +186,10 @@ class PipelineOrchestrator:
             providers = self._get_providers(config.providers)
             
             # Get instruments (filtered by tags if specified)
-            instruments = await self._get_instruments(config)
+            market_data_required = any(
+                provider.provider_type != ProviderType.MACRO for provider in providers
+            )
+            instruments = await self._get_instruments(config, required=market_data_required)
             
             # Execute providers
             if config.parallel and len(providers) > 1:
@@ -247,16 +252,17 @@ class PipelineOrchestrator:
             logger.error("Pipeline run failed", error=str(e))
             
             # Try to update run record with failure
-            try:
-                with self._db.session() as session:
-                    run_repo = PipelineRunRepository(session)
-                    run_repo.complete_run(
-                        run_id=run_id,
-                        status=RunStatus.FAILED.value,
-                        errors=str(e),
-                    )
-            except Exception:
-                pass
+            if run_id is not None:
+                try:
+                    with self._db.session() as session:
+                        run_repo = PipelineRunRepository(session)
+                        run_repo.complete_run(
+                            run_id=run_id,
+                            status=RunStatus.FAILED.value,
+                            errors=str(e),
+                        )
+                except Exception:
+                    pass
             
             raise PipelineError(
                 "Pipeline execution failed",
@@ -280,21 +286,46 @@ class PipelineOrchestrator:
             if self._registry.has(name)
         ]
     
-    async def _get_instruments(self, config: RunConfig) -> Optional[list[str]]:
+    async def _get_instruments(
+        self,
+        config: RunConfig,
+        *,
+        required: bool = True,
+    ) -> Optional[list[str]]:
         """Get instruments to fetch data for."""
         # If specific instruments provided, use those
         if config.instruments:
             return config.instruments
-        
+
+        if not required:
+            return None
+
         # If tags specified, get instruments with those tags
         if config.tags:
             with self._db.session() as session:
                 repo = InstrumentRepository(session)
                 instruments = repo.get_by_tags(config.tags)
-                return [i.ticker for i in instruments]
-        
-        # Otherwise return None (fetch all)
-        return None
+                tickers = [i.ticker for i in instruments]
+            if not tickers:
+                raise PipelineError(
+                    "No active instruments matched the requested tags",
+                    stage="instrument_selection",
+                    details={"tags": config.tags},
+                )
+            return tickers
+
+        with self._db.session() as session:
+            repo = InstrumentRepository(session)
+            instruments = repo.get_active()
+            tickers = [i.ticker for i in instruments]
+
+        if not tickers:
+            raise PipelineError(
+                "No active instruments are configured for market data providers",
+                stage="instrument_selection",
+            )
+
+        return tickers
     
     async def _run_providers_parallel(
         self,
