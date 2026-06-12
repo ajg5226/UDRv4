@@ -1,6 +1,8 @@
+import importlib.util
 from contextlib import contextmanager
 from datetime import date
 from decimal import Decimal
+from pathlib import Path
 
 import pandas as pd
 import pytest
@@ -14,7 +16,13 @@ from atlas.pipeline.orchestrator import PipelineOrchestrator, RunConfig
 from atlas.storage import database
 from atlas.storage.models import Base, DimInstrument, DimSource
 from atlas.storage.repository import OHLCVRepository
-from scripts.backfill_5year import build_macro_records
+
+BACKFILL_SCRIPT = Path(__file__).resolve().parents[1] / "scripts" / "backfill_5year.py"
+BACKFILL_SPEC = importlib.util.spec_from_file_location("backfill_5year", BACKFILL_SCRIPT)
+assert BACKFILL_SPEC is not None
+backfill_5year = importlib.util.module_from_spec(BACKFILL_SPEC)
+assert BACKFILL_SPEC.loader is not None
+BACKFILL_SPEC.loader.exec_module(backfill_5year)
 
 
 def test_production_dashboard_auth_requires_configured_users(monkeypatch: pytest.MonkeyPatch) -> None:
@@ -131,7 +139,7 @@ def test_backfill_macro_records_use_fred_obs_date_column() -> None:
         ]
     )
 
-    records = build_macro_records(df, {"GDP": 7}, fred_source_id=3)
+    records = backfill_5year.build_macro_records(df, {"GDP": 7}, fred_source_id=3)
 
     assert records == [
         {
