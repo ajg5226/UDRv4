@@ -2,7 +2,7 @@
 
 import json
 from datetime import date, datetime
-from typing import Generic, Optional, Type, TypeVar
+from typing import Any, Generic, Optional, Type, TypeVar
 
 import pandas as pd
 from sqlalchemy import and_, delete, select, update
@@ -31,7 +31,7 @@ def _has_value(value: object) -> bool:
     return value is not None and bool(pd.notna(value))
 
 
-def _float_or_none(value: object) -> Optional[float]:
+def _float_or_none(value: Any) -> Optional[float]:
     """Convert present numeric values to float while preserving real zeroes."""
     if not _has_value(value):
         return None
