@@ -1,6 +1,8 @@
 import json
+import importlib.util
 from contextlib import contextmanager
 from datetime import date, datetime
+from pathlib import Path
 
 import pandas as pd
 import pytest
@@ -13,7 +15,13 @@ from atlas.pipeline.orchestrator import PipelineOrchestrator, RunConfig
 from atlas.storage.database import Database, reset_database
 from atlas.storage.models import DimInstrument, DimMacroSeries, DimSource
 from atlas.storage.repository import FeatureRepository, MacroRepository, OHLCVRepository
-from scripts.backfill_5year import _extract_row_date
+
+BACKFILL_SCRIPT = Path(__file__).resolve().parents[1] / "scripts" / "backfill_5year.py"
+BACKFILL_SPEC = importlib.util.spec_from_file_location("backfill_5year", BACKFILL_SCRIPT)
+backfill_5year = importlib.util.module_from_spec(BACKFILL_SPEC)
+assert BACKFILL_SPEC.loader is not None
+BACKFILL_SPEC.loader.exec_module(backfill_5year)
+_extract_row_date = backfill_5year._extract_row_date
 
 
 @pytest.fixture(autouse=True)
