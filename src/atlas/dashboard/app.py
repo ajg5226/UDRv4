@@ -1,8 +1,6 @@
 """Main Streamlit dashboard application for ATLAS."""
 
-import os
-from datetime import date, datetime, timedelta
-from typing import Optional
+from datetime import date, timedelta
 
 import pandas as pd
 import streamlit as st
@@ -16,7 +14,7 @@ st.set_page_config(
 )
 
 from atlas.dashboard.auth import check_authentication, show_login
-from atlas.core.config import get_settings
+from atlas.core.config import get_settings, is_development_environment
 from atlas.core.logging import setup_logging
 from atlas.storage.database import get_database
 from atlas.storage.repository import (
@@ -36,10 +34,13 @@ def main() -> None:
     settings = get_settings()
     
     # Authentication
-    if settings.dashboard.auth.enabled:
-        if not check_authentication():
-            show_login()
-            return
+    if not settings.dashboard.auth.enabled and not is_development_environment(settings.environment):
+        st.error("Dashboard authentication must be enabled outside development environments.")
+        st.stop()
+
+    if settings.dashboard.auth.enabled and not check_authentication():
+        show_login()
+        return
     
     # Sidebar navigation
     st.sidebar.title("📊 ATLAS Dashboard")

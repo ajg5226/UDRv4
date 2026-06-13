@@ -1,16 +1,15 @@
 """Pipeline orchestrator for coordinating data ingestion."""
 
 import asyncio
-import json
 from dataclasses import dataclass, field
 from datetime import date, datetime, timedelta
 from enum import Enum
-from typing import Any, Optional
+from typing import Optional
 
 import pandas as pd
 
 from atlas.core.config import get_settings
-from atlas.core.exceptions import PipelineError, ProviderError
+from atlas.core.exceptions import PipelineError
 from atlas.core.logging import get_logger, bind_context, clear_context
 from atlas.providers.base import ProviderResult, ProviderType
 from atlas.providers.registry import get_provider_registry, setup_providers
@@ -153,6 +152,7 @@ class PipelineOrchestrator:
         
         config = config or RunConfig()
         start_time = datetime.utcnow()
+        run_id: Optional[int] = None
         
         # Bind logging context
         bind_context(
@@ -247,16 +247,17 @@ class PipelineOrchestrator:
             logger.error("Pipeline run failed", error=str(e))
             
             # Try to update run record with failure
-            try:
-                with self._db.session() as session:
-                    run_repo = PipelineRunRepository(session)
-                    run_repo.complete_run(
-                        run_id=run_id,
-                        status=RunStatus.FAILED.value,
-                        errors=str(e),
-                    )
-            except Exception:
-                pass
+            if run_id is not None:
+                try:
+                    with self._db.session() as session:
+                        run_repo = PipelineRunRepository(session)
+                        run_repo.complete_run(
+                            run_id=run_id,
+                            status=RunStatus.FAILED.value,
+                            errors=str(e),
+                        )
+                except Exception:
+                    pass
             
             raise PipelineError(
                 "Pipeline execution failed",

@@ -21,6 +21,12 @@ def find_project_root() -> Path:
 
 PROJECT_ROOT = find_project_root()
 CONFIG_DIR = PROJECT_ROOT / "config"
+DEVELOPMENT_ENVIRONMENTS = {"development", "dev", "local", "test", "testing"}
+
+
+def is_development_environment(environment: str) -> bool:
+    """Return whether an environment name is allowed to use local defaults."""
+    return environment.strip().lower() in DEVELOPMENT_ENVIRONMENTS
 
 
 class RetryConfig(BaseModel):

@@ -27,11 +27,22 @@ from rich.table import Table
 console = Console()
 
 
+def _extract_row_date(row, primary: str, fallback: str = "date") -> date | None:
+    """Extract a date from provider rows that may use provider-specific names."""
+    row_date = row.get(primary, row.get(fallback))
+    if row_date is None:
+        return None
+    if hasattr(row_date, "date"):
+        return row_date.date()
+    if isinstance(row_date, str):
+        return date.fromisoformat(row_date[:10])
+    return row_date
+
+
 async def main():
     console.print("\n[bold blue]ATLAS V1 - 5 Year Historical Backfill[/bold blue]\n")
     
     # Import after path setup
-    from atlas.core.config import get_settings
     from atlas.core.logging import setup_logging
     from atlas.storage.database import get_database
     from atlas.storage.repository import (
@@ -46,7 +57,6 @@ async def main():
     from atlas.providers.fred import FredProvider
     
     setup_logging()
-    settings = get_settings()
     
     # Date range
     end_date = date.today() - timedelta(days=1)  # Yesterday
@@ -114,13 +124,8 @@ async def main():
                 if instrument_id and not df.empty:
                     for _, row in df.iterrows():
                         # The Tiingo provider returns 'trade_date', not 'date'
-                        trade_date = row.get("trade_date", row.get("date"))
+                        trade_date = _extract_row_date(row, "trade_date")
                         if trade_date is not None:
-                            if hasattr(trade_date, "date"):
-                                trade_date = trade_date.date()
-                            elif isinstance(trade_date, str):
-                                trade_date = date.fromisoformat(trade_date[:10])
-                            
                             ohlcv_records.append({
                                 "instrument_id": instrument_id,
                                 "trade_date": trade_date,
@@ -240,13 +245,8 @@ async def main():
                 if db_series_id and not df.empty:
                     for _, row in df.iterrows():
                         if row.get("value") is not None:
-                            obs_date = row.get("date")
+                            obs_date = _extract_row_date(row, "obs_date")
                             if obs_date is not None:
-                                if hasattr(obs_date, "date"):
-                                    obs_date = obs_date.date()
-                                elif isinstance(obs_date, str):
-                                    obs_date = date.fromisoformat(obs_date[:10])
-                                
                                 macro_records.append({
                                     "series_id": db_series_id,
                                     "source_id": fred_source_id,
