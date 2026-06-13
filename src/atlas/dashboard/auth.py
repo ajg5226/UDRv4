@@ -3,7 +3,6 @@
 import hashlib
 import json
 import os
-from typing import Optional
 
 import streamlit as st
 

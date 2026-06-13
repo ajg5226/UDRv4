@@ -6,8 +6,6 @@ from typing import Generic, Optional, Type, TypeVar
 
 import pandas as pd
 from sqlalchemy import and_, delete, select, update
-from sqlalchemy.dialects.postgresql import insert as pg_insert
-from sqlalchemy.dialects.sqlite import insert as sqlite_insert
 from sqlalchemy.orm import Session
 
 from atlas.core.logging import get_logger
