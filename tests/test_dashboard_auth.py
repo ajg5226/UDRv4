@@ -1,13 +1,9 @@
 """Regression tests for dashboard authentication configuration."""
 
 import json
-import sys
 from collections.abc import Generator
-from types import SimpleNamespace
 
 import pytest
-
-sys.modules.setdefault("streamlit", SimpleNamespace(session_state={}))
 
 from atlas.core.config import get_settings
 from atlas.core.exceptions import ConfigurationError
