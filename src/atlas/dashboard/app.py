@@ -16,7 +16,8 @@ st.set_page_config(
 )
 
 from atlas.dashboard.auth import check_authentication, show_login
-from atlas.core.config import get_settings
+from atlas.core.config import get_settings, is_development_environment
+from atlas.core.exceptions import ConfigurationError
 from atlas.core.logging import setup_logging
 from atlas.storage.database import get_database
 from atlas.storage.repository import (
@@ -34,9 +35,15 @@ setup_logging(level="WARNING", format_type="text")
 def main() -> None:
     """Main dashboard entry point."""
     settings = get_settings()
-    
+
     # Authentication
-    if settings.dashboard.auth.enabled:
+    if not settings.dashboard.auth.enabled:
+        if not is_development_environment(settings.environment):
+            raise ConfigurationError(
+                "Dashboard authentication cannot be disabled outside development environments",
+                details={"environment": settings.environment},
+            )
+    else:
         if not check_authentication():
             show_login()
             return
