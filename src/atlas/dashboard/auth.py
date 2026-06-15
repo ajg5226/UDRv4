@@ -83,7 +83,7 @@ def get_users() -> dict[str, str]:
         )
 
     # Default users for local development only (password: atlas123).
-    default_password_hash = hashlib.sha256("atlas123".encode()).hexdigest()
+    default_password_hash = hashlib.sha256(b"atlas123").hexdigest()
 
     return {
         "admin": default_password_hash,
