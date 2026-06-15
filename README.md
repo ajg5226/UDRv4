@@ -141,8 +141,9 @@ UDRv4/
 ├── infrastructure/            # Infrastructure as code
 │   └── azure/                 # Azure Bicep templates
 ├── docs/                      # Documentation
-│   └── ARCHITECTURE_DOCUMENT.md
-├── tests/                     # Test suite
+│   ├── ARCHITECTURE_DOCUMENT.md
+│   └── FEATURES.md            # Feature Engine V2 guide
+├── tests/                     # Test suite (when added)
 ├── pyproject.toml             # Project configuration
 └── README.md                  # This file
 ```
@@ -157,8 +158,20 @@ UDRv4/
 | `atlas init-db` | Initialize database schema |
 | `atlas instruments list` | List active instruments |
 | `atlas instruments add-tag` | Add tag to instrument |
+| `atlas instruments remove-tag` | Remove tag from instrument |
 | `atlas dashboard` | Launch Streamlit dashboard |
 | `atlas version` | Show version |
+
+Useful run options:
+
+```bash
+# Show detailed logs during a run
+atlas run --date 2026-01-24 --verbose
+
+# Pass the feature skip flag during a run or backfill
+atlas run --date 2026-01-24 --skip-features
+atlas backfill --start 2020-01-01 --end 2020-01-31 --batch-size 10 --skip-features
+```
 
 ## Database Schema
 
@@ -172,11 +185,12 @@ UDRv4/
 
 - **fact_ohlcv** - Daily OHLCV price data (raw + adjusted)
 - **fact_macro** - Macroeconomic indicator observations
-- **fact_features** - Calculated feature values
+- **fact_feature** - Calculated feature values
 
 ### Operational Tables
 
 - **instrument_tag** - Many-to-many instrument tags
+- **feature_diagnostic** - Feature quality metrics such as IC and hit rate
 - **pipeline_run** - Pipeline execution history
 
 ## Adding New Providers
@@ -213,34 +227,28 @@ class MyProvider(BaseProvider):
 
 ## Adding New Features
 
-1. Create a feature class inheriting from `BaseFeature`:
+Feature Engine V2 uses `FEATURE_CATALOG` in `src/atlas/features/schema.py` as
+the source of truth. Add a `FeatureDefinition` there, then add or update the
+matching family generator logic in `src/atlas/features/generators.py`.
 
 ```python
-from atlas.features.base import BaseFeature
-
-class MyFeature(BaseFeature):
-    @property
-    def name(self) -> str:
-        return "my_feature"
-    
-    @property
-    def category(self) -> str:
-        return "custom"
-    
-    @property
-    def dependencies(self) -> list[str]:
-        return ["adj_close"]  # Required input data
-    
-    @property
-    def lookback_days(self) -> int:
-        return 20
-    
-    def calculate(self, data, target_date, parameters=None):
-        # Implementation
-        ...
+register_feature(FeatureDefinition(
+    name="risk_realized_vol",
+    family=FeatureFamily.RISK,
+    description="Realized volatility (annualized)",
+    horizon_family=HorizonFamily.MULTI,
+    lookback_days=21,
+    min_history=126,
+    lookback_variants=[21, 63],
+    directionality=Directionality.LOWER_BETTER,
+    transforms=[TransformType.RAW, TransformType.RANK],
+    requires=[DataRequirement.OHLCV],
+    priority=1,
+))
 ```
 
-2. Register in `features/registry.py`
+See [`docs/FEATURES.md`](docs/FEATURES.md) for the implemented feature families,
+variant naming rules, persistence fields, and current integration limitations.
 
 ## Azure Deployment
 
