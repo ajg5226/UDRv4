@@ -3,6 +3,7 @@
 import hashlib
 import json
 from datetime import date, datetime
+from types import SimpleNamespace
 
 import pandas as pd
 import pytest
@@ -78,9 +79,11 @@ def test_development_dashboard_defaults_remain_available(
 def test_dashboard_auth_cannot_be_disabled_in_production(
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
-    monkeypatch.setenv("ATLAS_ENV", "production")
-    monkeypatch.setenv("ATLAS_DASHBOARD__AUTH__ENABLED", "false")
-    _reset_cached_state()
+    settings = SimpleNamespace(
+        environment="production",
+        dashboard=SimpleNamespace(auth=SimpleNamespace(enabled=False)),
+    )
+    monkeypatch.setattr(dashboard_app, "get_settings", lambda: settings)
 
     with pytest.raises(ConfigurationError, match="authentication cannot be disabled"):
         dashboard_app.main()
