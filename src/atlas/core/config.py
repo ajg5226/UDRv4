@@ -3,7 +3,7 @@
 import os
 from functools import lru_cache
 from pathlib import Path
-from typing import Any, Optional
+from typing import Any
 
 import yaml
 from pydantic import BaseModel, Field, field_validator
@@ -26,7 +26,7 @@ DEVELOPMENT_ENVIRONMENTS = {"development", "dev", "local", "test", "testing"}
 
 def is_development_environment(environment: str | None = None) -> bool:
     """Return True for environments where local development fallbacks are safe."""
-    env = environment or os.getenv("ATLAS_ENV", "development")
+    env = environment if environment is not None else os.getenv("ATLAS_ENV", "development")
     return env.strip().lower() in DEVELOPMENT_ENVIRONMENTS
 
 
@@ -225,7 +225,7 @@ class Settings(BaseSettings):
     keyvault: KeyVaultConfig = Field(default_factory=KeyVaultConfig)
 
     @classmethod
-    def from_yaml(cls, config_path: Optional[Path] = None) -> "Settings":
+    def from_yaml(cls, config_path: Path | None = None) -> "Settings":
         """Load settings from YAML file(s)."""
         if config_path is None:
             config_path = CONFIG_DIR / "default.yaml"
