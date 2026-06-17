@@ -2,7 +2,7 @@
 
 import json
 from datetime import date, datetime
-from typing import Generic, Optional, Type, TypeVar
+from typing import Any, Generic, Optional, Type, TypeVar, cast
 
 import pandas as pd
 from sqlalchemy import and_, delete, select, update
@@ -40,7 +40,7 @@ def _float_or_none(value: object) -> Optional[float]:
     """Convert a scalar value to float while preserving legitimate zeroes."""
     if _is_missing(value):
         return None
-    return float(value)
+    return float(cast(Any, value))
 
 
 class BaseRepository(Generic[T]):
