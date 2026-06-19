@@ -26,7 +26,7 @@ DEVELOPMENT_ENVIRONMENTS = {"development", "dev", "local", "test", "testing"}
 
 def is_development_environment(environment: str | None = None) -> bool:
     """Return True when local fallback behavior is safe."""
-    env = environment or os.getenv("ATLAS_ENV", "development")
+    env = environment or os.getenv("ATLAS_ENV") or "development"
     return env.strip().lower() in DEVELOPMENT_ENVIRONMENTS
 
 

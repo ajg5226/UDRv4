@@ -123,7 +123,7 @@ def check_authentication() -> bool:
     Returns:
         True if authenticated
     """
-    return st.session_state.get("authenticated", False)
+    return bool(st.session_state.get("authenticated", False))
 
 
 def show_login() -> None:

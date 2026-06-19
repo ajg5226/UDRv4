@@ -3,6 +3,7 @@
 import os
 from collections.abc import Generator
 from contextlib import contextmanager
+from typing import Any
 
 from sqlalchemy import create_engine, event, text
 from sqlalchemy.engine import Engine
@@ -99,11 +100,15 @@ class Database:
 
             # Add event listeners for connection lifecycle
             @event.listens_for(self._engine, "connect")
-            def on_connect(dbapi_conn, connection_record):
+            def on_connect(dbapi_conn: Any, connection_record: Any) -> None:
                 logger.debug("Database connection established")
 
             @event.listens_for(self._engine, "checkout")
-            def on_checkout(dbapi_conn, connection_record, connection_proxy):
+            def on_checkout(
+                dbapi_conn: Any,
+                connection_record: Any,
+                connection_proxy: Any,
+            ) -> None:
                 logger.debug("Database connection checked out from pool")
 
             logger.info(

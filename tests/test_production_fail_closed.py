@@ -2,6 +2,7 @@
 
 import hashlib
 import json
+from collections.abc import Generator
 
 import pytest
 
@@ -19,7 +20,7 @@ def _reset_cached_state() -> None:
 
 
 @pytest.fixture(autouse=True)
-def clean_environment(monkeypatch: pytest.MonkeyPatch):
+def clean_environment(monkeypatch: pytest.MonkeyPatch) -> Generator[None, None, None]:
     for env_var in [
         "ATLAS_ENV",
         "ATLAS_DASHBOARD_USERS",
