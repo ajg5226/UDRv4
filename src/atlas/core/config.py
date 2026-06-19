@@ -21,6 +21,13 @@ def find_project_root() -> Path:
 
 PROJECT_ROOT = find_project_root()
 CONFIG_DIR = PROJECT_ROOT / "config"
+DEVELOPMENT_ENVIRONMENTS = {"development", "dev", "local", "test", "testing"}
+
+
+def is_development_environment(environment: Optional[str] = None) -> bool:
+    """Return True when local fallback behavior is safe."""
+    env = environment or os.getenv("ATLAS_ENV", "development")
+    return env.strip().lower() in DEVELOPMENT_ENVIRONMENTS
 
 
 class RetryConfig(BaseModel):
