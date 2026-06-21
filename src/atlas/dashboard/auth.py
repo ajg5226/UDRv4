@@ -2,7 +2,6 @@
 
 import hashlib
 import json
-from typing import Optional
 
 import streamlit as st
 
@@ -47,7 +46,7 @@ def get_users() -> dict[str, str]:
             details={"secret": settings.dashboard.auth.users_secret},
         )
 
-    default_password_hash = hashlib.sha256("atlas123".encode()).hexdigest()
+    default_password_hash = hashlib.sha256(b"atlas123").hexdigest()
     
     return {
         "admin": default_password_hash,
