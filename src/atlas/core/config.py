@@ -252,6 +252,11 @@ def deep_merge(base: dict[str, Any], override: dict[str, Any]) -> dict[str, Any]
     return result
 
 
+def is_development_environment(environment: str) -> bool:
+    """Return whether an environment may use local development defaults."""
+    return environment.lower() in {"development", "dev", "local", "test", "testing"}
+
+
 @lru_cache
 def get_settings() -> Settings:
     """Get cached settings instance."""
