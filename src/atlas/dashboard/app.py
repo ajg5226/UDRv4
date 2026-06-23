@@ -15,7 +15,7 @@ st.set_page_config(
     initial_sidebar_state="expanded",
 )
 
-from atlas.dashboard.auth import check_authentication, show_login
+from atlas.dashboard.auth import check_authentication, show_login, validate_auth_configuration
 from atlas.core.config import get_settings
 from atlas.core.logging import setup_logging
 from atlas.storage.database import get_database
@@ -34,6 +34,7 @@ setup_logging(level="WARNING", format_type="text")
 def main() -> None:
     """Main dashboard entry point."""
     settings = get_settings()
+    validate_auth_configuration()
     
     # Authentication
     if settings.dashboard.auth.enabled:
