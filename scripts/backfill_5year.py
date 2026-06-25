@@ -27,6 +27,22 @@ from rich.table import Table
 console = Console()
 
 
+def coerce_provider_date(value):
+    """Convert provider date-like values to a date object."""
+    if value is None:
+        return None
+    if hasattr(value, "date"):
+        return value.date()
+    if isinstance(value, str):
+        return date.fromisoformat(value[:10])
+    return value
+
+
+def get_provider_row_date(row, primary_key):
+    """Extract a provider row date using a provider-specific key before legacy 'date'."""
+    return coerce_provider_date(row.get(primary_key, row.get("date")))
+
+
 async def main():
     console.print("\n[bold blue]ATLAS V1 - 5 Year Historical Backfill[/bold blue]\n")
     
@@ -114,13 +130,8 @@ async def main():
                 if instrument_id and not df.empty:
                     for _, row in df.iterrows():
                         # The Tiingo provider returns 'trade_date', not 'date'
-                        trade_date = row.get("trade_date", row.get("date"))
+                        trade_date = get_provider_row_date(row, "trade_date")
                         if trade_date is not None:
-                            if hasattr(trade_date, "date"):
-                                trade_date = trade_date.date()
-                            elif isinstance(trade_date, str):
-                                trade_date = date.fromisoformat(trade_date[:10])
-                            
                             ohlcv_records.append({
                                 "instrument_id": instrument_id,
                                 "trade_date": trade_date,
@@ -240,13 +251,8 @@ async def main():
                 if db_series_id and not df.empty:
                     for _, row in df.iterrows():
                         if row.get("value") is not None:
-                            obs_date = row.get("date")
+                            obs_date = get_provider_row_date(row, "obs_date")
                             if obs_date is not None:
-                                if hasattr(obs_date, "date"):
-                                    obs_date = obs_date.date()
-                                elif isinstance(obs_date, str):
-                                    obs_date = date.fromisoformat(obs_date[:10])
-                                
                                 macro_records.append({
                                     "series_id": db_series_id,
                                     "source_id": fred_source_id,

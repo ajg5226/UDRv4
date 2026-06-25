@@ -15,6 +15,7 @@ from atlas.core.logging import get_logger, bind_context, clear_context
 from atlas.providers.base import ProviderResult, ProviderType
 from atlas.providers.registry import get_provider_registry, setup_providers
 from atlas.storage.database import get_database
+from atlas.storage.models import DimInstrument, DimMacroSeries
 from atlas.storage.repository import (
     InstrumentRepository,
     MacroRepository,
@@ -153,6 +154,7 @@ class PipelineOrchestrator:
         
         config = config or RunConfig()
         start_time = datetime.utcnow()
+        run_id: Optional[int] = None
         
         # Bind logging context
         bind_context(
@@ -248,13 +250,14 @@ class PipelineOrchestrator:
             
             # Try to update run record with failure
             try:
-                with self._db.session() as session:
-                    run_repo = PipelineRunRepository(session)
-                    run_repo.complete_run(
-                        run_id=run_id,
-                        status=RunStatus.FAILED.value,
-                        errors=str(e),
-                    )
+                if run_id is not None:
+                    with self._db.session() as session:
+                        run_repo = PipelineRunRepository(session)
+                        run_repo.complete_run(
+                            run_id=run_id,
+                            status=RunStatus.FAILED.value,
+                            errors=str(e),
+                        )
             except Exception:
                 pass
             
@@ -451,7 +454,6 @@ class PipelineOrchestrator:
             instrument = instrument_repo.get_by_ticker(ticker)
             if instrument is None:
                 # Create new instrument
-                from atlas.storage.models import DimInstrument
                 instrument = DimInstrument(
                     ticker=ticker,
                     asset_type="equity",  # Default, will be updated
@@ -506,7 +508,6 @@ class PipelineOrchestrator:
             if series is None:
                 # Get series info
                 series_info = all_series.get(fred_id, {})
-                from atlas.storage.models import DimMacroSeries
                 series = DimMacroSeries(
                     fred_id=fred_id,
                     name=series_info.get("name", fred_id),
