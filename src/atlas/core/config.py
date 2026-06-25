@@ -262,3 +262,9 @@ def reload_settings() -> Settings:
     """Reload settings (clears cache)."""
     get_settings.cache_clear()
     return get_settings()
+
+
+def is_development_environment(settings: Optional[Settings] = None) -> bool:
+    """Return True for local/dev/test environments where safe fallbacks are allowed."""
+    settings = settings or get_settings()
+    return settings.environment.lower() in {"development", "dev", "local", "test", "testing"}

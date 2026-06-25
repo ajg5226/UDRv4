@@ -28,6 +28,17 @@ logger = get_logger(__name__)
 T = TypeVar("T", bound=Base)
 
 
+def _is_present(value: object) -> bool:
+    """Return False only for missing scalar values; numeric zero is valid data."""
+    if value is None:
+        return False
+
+    try:
+        return not bool(pd.isna(value))
+    except (TypeError, ValueError):
+        return True
+
+
 class BaseRepository(Generic[T]):
     """Base repository with common CRUD operations."""
 
@@ -308,15 +319,15 @@ class OHLCVRepository(BaseRepository[FactOHLCV]):
             {
                 "instrument_id": r.instrument_id,
                 "trade_date": r.trade_date,
-                "open": float(r.open) if r.open else None,
-                "high": float(r.high) if r.high else None,
-                "low": float(r.low) if r.low else None,
-                "close": float(r.close) if r.close else None,
+                "open": float(r.open) if r.open is not None else None,
+                "high": float(r.high) if r.high is not None else None,
+                "low": float(r.low) if r.low is not None else None,
+                "close": float(r.close) if r.close is not None else None,
                 "volume": r.volume,
-                "adj_open": float(r.adj_open) if r.adj_open else None,
-                "adj_high": float(r.adj_high) if r.adj_high else None,
-                "adj_low": float(r.adj_low) if r.adj_low else None,
-                "adj_close": float(r.adj_close) if r.adj_close else None,
+                "adj_open": float(r.adj_open) if r.adj_open is not None else None,
+                "adj_high": float(r.adj_high) if r.adj_high is not None else None,
+                "adj_low": float(r.adj_low) if r.adj_low is not None else None,
+                "adj_close": float(r.adj_close) if r.adj_close is not None else None,
                 "adj_volume": r.adj_volume,
             }
             for r in results.scalars()
@@ -353,7 +364,7 @@ class OHLCVRepository(BaseRepository[FactOHLCV]):
             if existing:
                 # Update
                 for key, value in record.items():
-                    if hasattr(existing, key):
+                    if hasattr(existing, key) and _is_present(value):
                         setattr(existing, key, value)
                 updated += 1
             else:
@@ -432,7 +443,7 @@ class MacroRepository(BaseRepository[FactMacro]):
             {
                 "series_id": r.series_id,
                 "obs_date": r.obs_date,
-                "value": float(r.value) if r.value else None,
+                "value": float(r.value) if r.value is not None else None,
             }
             for r in results.scalars()
         ]
@@ -459,7 +470,11 @@ class MacroRepository(BaseRepository[FactMacro]):
             existing = self.get_by_series_date(record["series_id"], record["obs_date"])
 
             if existing:
-                existing.value = record["value"]
+                if _is_present(record["value"]):
+                    existing.value = record["value"]
+                if run_id:
+                    existing.run_id = run_id
+                existing.source_id = source_id
                 updated += 1
             else:
                 self.session.add(FactMacro(**record))
@@ -514,7 +529,7 @@ class FeatureRepository(BaseRepository[FactFeature]):
                 "instrument_id": r.instrument_id,
                 "trade_date": r.trade_date,
                 "feature_name": r.feature_name,
-                "value": float(r.value) if r.value else None,
+                "value": float(r.value) if r.value is not None else None,
             }
             for r in results
         ]
@@ -553,7 +568,9 @@ class FeatureRepository(BaseRepository[FactFeature]):
             )
 
             if existing:
-                existing.value = record["value"]
+                for key, value in record.items():
+                    if hasattr(existing, key) and _is_present(value):
+                        setattr(existing, key, value)
                 updated += 1
             else:
                 self.session.add(FactFeature(**record))
