@@ -57,7 +57,7 @@ def test_dashboard_users_fail_closed_in_production(monkeypatch):
     with pytest.raises(ConfigurationError, match="Dashboard users secret is required"):
         get_users()
 
-    password_hash = hashlib.sha256("correct horse battery staple".encode()).hexdigest()
+    password_hash = hashlib.sha256(b"correct horse battery staple").hexdigest()
     monkeypatch.setenv("ATLAS_DASHBOARD_USERS", json.dumps({"admin": password_hash}))
 
     assert get_users() == {"admin": password_hash}
