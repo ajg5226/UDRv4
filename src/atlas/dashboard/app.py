@@ -1,9 +1,5 @@
 """Main Streamlit dashboard application for ATLAS."""
 
-import os
-from datetime import date, datetime, timedelta
-from typing import Optional
-
 import pandas as pd
 import streamlit as st
 
