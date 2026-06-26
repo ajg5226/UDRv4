@@ -3,11 +3,35 @@
 import hashlib
 import json
 import os
-from typing import Optional
 
 import streamlit as st
 
 from atlas.core.config import get_settings
+from atlas.core.exceptions import ConfigurationError
+from atlas.core.logging import get_logger
+from atlas.core.secrets import get_secret
+
+logger = get_logger(__name__)
+
+
+def is_development_environment(environment: str) -> bool:
+    """Return whether development-only fallbacks are allowed."""
+    return environment.lower() in {"development", "dev", "local", "test", "testing"}
+
+
+def _parse_users(users_json: str) -> dict[str, str]:
+    """Parse dashboard users from JSON and validate the expected shape."""
+    users = json.loads(users_json)
+    if (
+        not isinstance(users, dict)
+        or not users
+        or not all(
+            isinstance(username, str) and isinstance(password_hash, str)
+            for username, password_hash in users.items()
+        )
+    ):
+        raise ValueError("Dashboard users must be a non-empty JSON object of string hashes")
+    return users
 
 
 def get_users() -> dict[str, str]:
@@ -20,16 +44,36 @@ def get_users() -> dict[str, str]:
     Returns:
         Dict of username -> password_hash
     """
-    # Try environment variable first (JSON format)
+    settings = get_settings()
+    is_dev = is_development_environment(settings.environment)
+
+    # Try environment variable first, then the configured secret (JSON format)
     users_json = os.getenv("ATLAS_DASHBOARD_USERS")
+    if not users_json:
+        users_json = get_secret(settings.dashboard.auth.users_secret)
+
     if users_json:
         try:
-            return json.loads(users_json)
-        except json.JSONDecodeError:
-            pass
+            return _parse_users(users_json)
+        except (json.JSONDecodeError, ValueError) as e:
+            if not is_dev:
+                raise ConfigurationError(
+                    "Dashboard users configuration is invalid",
+                    details={"environment": settings.environment},
+                    cause=e,
+                ) from e
+            logger.warning("Invalid dashboard users configuration; using development defaults")
+
+    if not is_dev:
+        raise ConfigurationError(
+            "Dashboard users configuration is required outside development",
+            details={
+                "environment": settings.environment,
+                "secret_name": settings.dashboard.auth.users_secret,
+            },
+        )
     
     # Default users for development (password: atlas123)
-    # In production, set ATLAS_DASHBOARD_USERS or use Key Vault
     default_password_hash = hashlib.sha256("atlas123".encode()).hexdigest()
     
     return {
@@ -98,18 +142,18 @@ def show_login() -> None:
             else:
                 st.error("Invalid username or password")
     
-    # Development hint
-    st.markdown("""
-    ---
-    
-    **Development Mode**
-    
-    Default credentials:
-    - Username: `admin` or `analyst`
-    - Password: `atlas123`
-    
-    *Set `ATLAS_DASHBOARD_USERS` environment variable with JSON credentials for production.*
-    """)
+    if is_development_environment(get_settings().environment):
+        st.markdown("""
+        ---
+        
+        **Development Mode**
+        
+        Default credentials:
+        - Username: `admin` or `analyst`
+        - Password: `atlas123`
+        
+        *Set `ATLAS_DASHBOARD_USERS` environment variable with JSON credentials for production.*
+        """)
 
 
 def logout() -> None:
