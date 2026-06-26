@@ -15,7 +15,7 @@ st.set_page_config(
     initial_sidebar_state="expanded",
 )
 
-from atlas.dashboard.auth import check_authentication, show_login
+from atlas.dashboard.auth import check_authentication, is_development_environment, show_login
 from atlas.core.config import get_settings
 from atlas.core.logging import setup_logging
 from atlas.storage.database import get_database
@@ -36,6 +36,13 @@ def main() -> None:
     settings = get_settings()
     
     # Authentication
+    if (
+        not settings.dashboard.auth.enabled
+        and not is_development_environment(settings.environment)
+    ):
+        st.error("Dashboard authentication must be enabled outside development.")
+        return
+
     if settings.dashboard.auth.enabled:
         if not check_authentication():
             show_login()
