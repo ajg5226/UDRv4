@@ -10,7 +10,7 @@ import pandas as pd
 
 from atlas.core.config import get_settings
 from atlas.core.exceptions import PipelineError
-from atlas.core.logging import get_logger, bind_context, clear_context
+from atlas.core.logging import bind_context, clear_context, get_logger
 from atlas.providers.base import ProviderResult, ProviderType
 from atlas.providers.registry import get_provider_registry, setup_providers
 from atlas.storage.database import get_database
@@ -313,7 +313,7 @@ class PipelineOrchestrator:
         results = await asyncio.gather(*tasks, return_exceptions=True)
         
         provider_results = {}
-        for provider, result in zip(providers, results):
+        for provider, result in zip(providers, results, strict=True):
             if isinstance(result, Exception):
                 logger.error(f"Provider {provider.name} failed", error=str(result))
                 # Create a failed result
