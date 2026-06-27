@@ -120,12 +120,14 @@ def check_authentication() -> bool:
 def show_login() -> None:
     """Display the login form."""
     st.title("🔐 ATLAS Login")
-    
-    st.markdown("""
-    Welcome to ATLAS Dashboard. Please log in to continue.
-    
-    ---
-    """)
+
+    st.markdown(
+        """
+Welcome to ATLAS Dashboard. Please log in to continue.
+
+---
+"""
+    )
     
     # Login form
     with st.form("login_form"):
@@ -143,17 +145,19 @@ def show_login() -> None:
                 st.error("Invalid username or password")
     
     if is_development_environment(get_settings().environment):
-        st.markdown("""
-        ---
-        
-        **Development Mode**
-        
-        Default credentials:
-        - Username: `admin` or `analyst`
-        - Password: `atlas123`
-        
-        *Set `ATLAS_DASHBOARD_USERS` environment variable with JSON credentials for production.*
-        """)
+        st.markdown(
+            """
+---
+
+**Development Mode**
+
+Default credentials:
+- Username: `admin` or `analyst`
+- Password: `atlas123`
+
+*Set `ATLAS_DASHBOARD_USERS` environment variable with JSON credentials for production.*
+"""
+        )
 
 
 def logout() -> None:
