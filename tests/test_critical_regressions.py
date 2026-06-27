@@ -53,6 +53,17 @@ def test_dashboard_auth_requires_users_outside_development(monkeypatch):
     assert "required outside development" in str(exc_info.value)
 
 
+def test_dashboard_auth_rejects_malformed_users_outside_development(monkeypatch):
+    monkeypatch.setenv("ATLAS_ENV", "production")
+    monkeypatch.setenv("ATLAS_DASHBOARD_USERS", "{not-json")
+    monkeypatch.setattr(auth, "get_secret", lambda name: None)
+
+    with pytest.raises(ConfigurationError) as exc_info:
+        auth.get_users()
+
+    assert "configuration is invalid" in str(exc_info.value)
+
+
 def test_dashboard_auth_uses_configured_secret_in_production(monkeypatch):
     monkeypatch.setenv("ATLAS_ENV", "production")
     monkeypatch.delenv("ATLAS_DASHBOARD_USERS", raising=False)
