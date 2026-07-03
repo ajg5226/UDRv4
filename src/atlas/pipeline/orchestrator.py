@@ -1,17 +1,16 @@
 """Pipeline orchestrator for coordinating data ingestion."""
 
 import asyncio
-import json
 from dataclasses import dataclass, field
 from datetime import date, datetime, timedelta
 from enum import Enum
-from typing import Any, Optional
+from typing import Optional
 
 import pandas as pd
 
 from atlas.core.config import get_settings
-from atlas.core.exceptions import PipelineError, ProviderError
-from atlas.core.logging import get_logger, bind_context, clear_context
+from atlas.core.exceptions import PipelineError
+from atlas.core.logging import bind_context, clear_context, get_logger
 from atlas.providers.base import ProviderResult, ProviderType
 from atlas.providers.registry import get_provider_registry, setup_providers
 from atlas.storage.database import get_database
@@ -166,6 +165,8 @@ class PipelineOrchestrator:
             tags=config.tags,
         )
         
+        run_id: Optional[int] = None
+
         try:
             # Create run record
             with self._db.session() as session:
@@ -247,16 +248,17 @@ class PipelineOrchestrator:
             logger.error("Pipeline run failed", error=str(e))
             
             # Try to update run record with failure
-            try:
-                with self._db.session() as session:
-                    run_repo = PipelineRunRepository(session)
-                    run_repo.complete_run(
-                        run_id=run_id,
-                        status=RunStatus.FAILED.value,
-                        errors=str(e),
-                    )
-            except Exception:
-                pass
+            if run_id is not None:
+                try:
+                    with self._db.session() as session:
+                        run_repo = PipelineRunRepository(session)
+                        run_repo.complete_run(
+                            run_id=run_id,
+                            status=RunStatus.FAILED.value,
+                            errors=str(e),
+                        )
+                except Exception:
+                    pass
             
             raise PipelineError(
                 "Pipeline execution failed",
@@ -311,7 +313,7 @@ class PipelineOrchestrator:
         results = await asyncio.gather(*tasks, return_exceptions=True)
         
         provider_results = {}
-        for provider, result in zip(providers, results):
+        for provider, result in zip(providers, results, strict=True):
             if isinstance(result, Exception):
                 logger.error(f"Provider {provider.name} failed", error=str(result))
                 # Create a failed result

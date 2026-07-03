@@ -31,7 +31,6 @@ async def main():
     console.print("\n[bold blue]ATLAS V1 - 5 Year Historical Backfill[/bold blue]\n")
     
     # Import after path setup
-    from atlas.core.config import get_settings
     from atlas.core.logging import setup_logging
     from atlas.storage.database import get_database
     from atlas.storage.repository import (
@@ -46,7 +45,6 @@ async def main():
     from atlas.providers.fred import FredProvider
     
     setup_logging()
-    settings = get_settings()
     
     # Date range
     end_date = date.today() - timedelta(days=1)  # Yesterday
@@ -240,7 +238,7 @@ async def main():
                 if db_series_id and not df.empty:
                     for _, row in df.iterrows():
                         if row.get("value") is not None:
-                            obs_date = row.get("date")
+                            obs_date = row.get("obs_date", row.get("date"))
                             if obs_date is not None:
                                 if hasattr(obs_date, "date"):
                                     obs_date = obs_date.date()
