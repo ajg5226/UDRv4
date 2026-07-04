@@ -60,9 +60,13 @@ def test_dashboard_uses_configured_production_credentials(
 def test_dashboard_auth_cannot_be_disabled_in_production(
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
-    monkeypatch.setenv("ATLAS_ENV", "production")
-    monkeypatch.setenv("ATLAS_DASHBOARD__AUTH__ENABLED", "false")
-    config.get_settings.cache_clear()
+    settings = config.Settings(
+        ATLAS_ENV="production",
+        dashboard=config.DashboardConfig(
+            auth=config.DashboardAuthConfig(enabled=False),
+        ),
+    )
+    monkeypatch.setattr(auth, "get_settings", lambda: settings)
 
     with pytest.raises(ConfigurationError, match="cannot be disabled"):
         auth.validate_dashboard_auth_config()
