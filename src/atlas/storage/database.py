@@ -1,9 +1,8 @@
 """Database connection and session management."""
 
 import os
-from contextlib import asynccontextmanager, contextmanager
-from functools import lru_cache
-from typing import AsyncGenerator, Generator, Optional
+from collections.abc import Generator
+from contextlib import contextmanager
 
 from sqlalchemy import create_engine, event, text
 from sqlalchemy.engine import Engine
@@ -24,12 +23,12 @@ class Database:
 
     def __init__(
         self,
-        connection_string: Optional[str] = None,
+        connection_string: str | None = None,
         echo: bool = False,
     ) -> None:
         """
         Initialize database connection.
-        
+
         Args:
             connection_string: Database connection string. If not provided,
                               will attempt to load from environment/Key Vault.
@@ -37,8 +36,8 @@ class Database:
         """
         self._connection_string = connection_string or self._get_connection_string()
         self._echo = echo
-        self._engine: Optional[Engine] = None
-        self._session_factory: Optional[sessionmaker[Session]] = None
+        self._engine: Engine | None = None
+        self._session_factory: sessionmaker[Session] | None = None
 
     def _get_connection_string(self) -> str:
         """Get connection string from environment or Key Vault."""
@@ -84,10 +83,10 @@ class Database:
         """Get or create the SQLAlchemy engine."""
         if self._engine is None:
             settings = get_settings()
-            
+
             # Determine pool settings based on driver
             is_sqlite = self._connection_string.startswith("sqlite")
-            
+
             pool_kwargs = {}
             if not is_sqlite:
                 pool_kwargs = {
@@ -137,7 +136,7 @@ class Database:
     def session(self) -> Generator[Session, None, None]:
         """
         Create a database session context manager.
-        
+
         Usage:
             with db.session() as session:
                 # Use session
@@ -190,28 +189,28 @@ class Database:
 
 
 # Global database instance (lazy initialization)
-_database: Optional[Database] = None
+_database: Database | None = None
 
 
 def get_database(
-    connection_string: Optional[str] = None,
+    connection_string: str | None = None,
     echo: bool = False,
 ) -> Database:
     """
     Get the global database instance.
-    
+
     Args:
         connection_string: Optional override for connection string
         echo: Whether to echo SQL (for debugging)
-        
+
     Returns:
         Database instance
     """
     global _database
-    
+
     if _database is None:
         _database = Database(connection_string=connection_string, echo=echo)
-    
+
     return _database
 
 

@@ -3,7 +3,7 @@
 import os
 from functools import lru_cache
 from pathlib import Path
-from typing import Any, Optional
+from typing import Any
 
 import yaml
 from pydantic import BaseModel, Field, field_validator
@@ -225,7 +225,7 @@ class Settings(BaseSettings):
     keyvault: KeyVaultConfig = Field(default_factory=KeyVaultConfig)
 
     @classmethod
-    def from_yaml(cls, config_path: Optional[Path] = None) -> "Settings":
+    def from_yaml(cls, config_path: Path | None = None) -> "Settings":
         """Load settings from YAML file(s)."""
         if config_path is None:
             config_path = CONFIG_DIR / "default.yaml"
