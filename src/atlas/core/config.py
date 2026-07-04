@@ -24,7 +24,7 @@ CONFIG_DIR = PROJECT_ROOT / "config"
 DEVELOPMENT_ENVIRONMENTS = {"development", "dev", "local", "test", "testing"}
 
 
-def is_development_environment(environment: Optional[str] = None) -> bool:
+def is_development_environment(environment: str | None = None) -> bool:
     """Return True when the configured environment allows local-only defaults."""
     env = environment if environment is not None else os.getenv("ATLAS_ENV", "development")
     return env.strip().lower() in DEVELOPMENT_ENVIRONMENTS
