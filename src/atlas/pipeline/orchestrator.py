@@ -1,17 +1,16 @@
 """Pipeline orchestrator for coordinating data ingestion."""
 
 import asyncio
-import json
 from dataclasses import dataclass, field
 from datetime import date, datetime, timedelta
 from enum import Enum
-from typing import Any, Optional
+from typing import Optional
 
 import pandas as pd
 
 from atlas.core.config import get_settings
-from atlas.core.exceptions import PipelineError, ProviderError
-from atlas.core.logging import get_logger, bind_context, clear_context
+from atlas.core.exceptions import PipelineError
+from atlas.core.logging import bind_context, clear_context, get_logger
 from atlas.providers.base import ProviderResult, ProviderType
 from atlas.providers.registry import get_provider_registry, setup_providers
 from atlas.storage.database import get_database
@@ -153,6 +152,7 @@ class PipelineOrchestrator:
         
         config = config or RunConfig()
         start_time = datetime.utcnow()
+        run_id: Optional[int] = None
         
         # Bind logging context
         bind_context(
@@ -250,11 +250,12 @@ class PipelineOrchestrator:
             try:
                 with self._db.session() as session:
                     run_repo = PipelineRunRepository(session)
-                    run_repo.complete_run(
-                        run_id=run_id,
-                        status=RunStatus.FAILED.value,
-                        errors=str(e),
-                    )
+                    if run_id is not None:
+                        run_repo.complete_run(
+                            run_id=run_id,
+                            status=RunStatus.FAILED.value,
+                            errors=str(e),
+                        )
             except Exception:
                 pass
             
