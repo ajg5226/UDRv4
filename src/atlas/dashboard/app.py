@@ -1,11 +1,23 @@
 """Main Streamlit dashboard application for ATLAS."""
 
-import os
-from datetime import date, datetime, timedelta
-from typing import Optional
+from datetime import date, timedelta
 
 import pandas as pd
 import streamlit as st
+from sqlalchemy import select
+
+from atlas.core.config import get_settings
+from atlas.core.logging import setup_logging
+from atlas.dashboard.auth import check_authentication, show_login, validate_dashboard_auth_config
+from atlas.storage.database import get_database
+from atlas.storage.models import PipelineRun
+from atlas.storage.repository import (
+    InstrumentRepository,
+    MacroRepository,
+    MacroSeriesRepository,
+    OHLCVRepository,
+    PipelineRunRepository,
+)
 
 # Page config must be first Streamlit command
 st.set_page_config(
@@ -15,18 +27,6 @@ st.set_page_config(
     initial_sidebar_state="expanded",
 )
 
-from atlas.dashboard.auth import check_authentication, show_login
-from atlas.core.config import get_settings
-from atlas.core.logging import setup_logging
-from atlas.storage.database import get_database
-from atlas.storage.repository import (
-    InstrumentRepository,
-    MacroRepository,
-    MacroSeriesRepository,
-    OHLCVRepository,
-    PipelineRunRepository,
-)
-
 # Setup logging
 setup_logging(level="WARNING", format_type="text")
 
@@ -34,6 +34,7 @@ setup_logging(level="WARNING", format_type="text")
 def main() -> None:
     """Main dashboard entry point."""
     settings = get_settings()
+    validate_dashboard_auth_config()
     
     # Authentication
     if settings.dashboard.auth.enabled:
@@ -114,9 +115,7 @@ def show_overview_page() -> None:
     with db.session() as session:
         run_repo = PipelineRunRepository(session)
         # Get recent runs (simple query)
-        from sqlalchemy import select
-        from atlas.storage.models import PipelineRun
-        
+
         stmt = select(PipelineRun).order_by(PipelineRun.start_time.desc()).limit(10)
         runs = list(session.scalars(stmt))
         
@@ -369,9 +368,6 @@ def show_pipeline_runs_page() -> None:
     
     # Fetch runs
     with db.session() as session:
-        from sqlalchemy import select
-        from atlas.storage.models import PipelineRun
-        
         stmt = select(PipelineRun).order_by(PipelineRun.start_time.desc()).limit(100)
         
         if run_type_filter != "All":
