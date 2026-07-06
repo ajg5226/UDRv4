@@ -28,6 +28,22 @@ logger = get_logger(__name__)
 T = TypeVar("T", bound=Base)
 
 
+def _is_missing(value: object) -> bool:
+    """Return True for values that represent missing provider data."""
+    if value is None:
+        return True
+
+    try:
+        return bool(pd.isna(value))
+    except (TypeError, ValueError):
+        return False
+
+
+def _clean_record_for_insert(record: dict) -> dict:
+    """Convert missing provider values to None before SQLAlchemy insertion."""
+    return {key: None if _is_missing(value) else value for key, value in record.items()}
+
+
 class BaseRepository(Generic[T]):
     """Base repository with common CRUD operations."""
 
@@ -308,15 +324,15 @@ class OHLCVRepository(BaseRepository[FactOHLCV]):
             {
                 "instrument_id": r.instrument_id,
                 "trade_date": r.trade_date,
-                "open": float(r.open) if r.open else None,
-                "high": float(r.high) if r.high else None,
-                "low": float(r.low) if r.low else None,
-                "close": float(r.close) if r.close else None,
+                "open": float(r.open) if r.open is not None else None,
+                "high": float(r.high) if r.high is not None else None,
+                "low": float(r.low) if r.low is not None else None,
+                "close": float(r.close) if r.close is not None else None,
                 "volume": r.volume,
-                "adj_open": float(r.adj_open) if r.adj_open else None,
-                "adj_high": float(r.adj_high) if r.adj_high else None,
-                "adj_low": float(r.adj_low) if r.adj_low else None,
-                "adj_close": float(r.adj_close) if r.adj_close else None,
+                "adj_open": float(r.adj_open) if r.adj_open is not None else None,
+                "adj_high": float(r.adj_high) if r.adj_high is not None else None,
+                "adj_low": float(r.adj_low) if r.adj_low is not None else None,
+                "adj_close": float(r.adj_close) if r.adj_close is not None else None,
                 "adj_volume": r.adj_volume,
             }
             for r in results.scalars()
@@ -342,7 +358,7 @@ class OHLCVRepository(BaseRepository[FactOHLCV]):
 
         for record in records:
             record["source_id"] = source_id
-            if run_id:
+            if run_id is not None:
                 record["run_id"] = run_id
 
             existing = self.get_by_instrument_date(
@@ -353,12 +369,12 @@ class OHLCVRepository(BaseRepository[FactOHLCV]):
             if existing:
                 # Update
                 for key, value in record.items():
-                    if hasattr(existing, key):
+                    if hasattr(existing, key) and not _is_missing(value):
                         setattr(existing, key, value)
                 updated += 1
             else:
                 # Insert
-                self.session.add(FactOHLCV(**record))
+                self.session.add(FactOHLCV(**_clean_record_for_insert(record)))
                 inserted += 1
 
         self.session.flush()
@@ -432,7 +448,7 @@ class MacroRepository(BaseRepository[FactMacro]):
             {
                 "series_id": r.series_id,
                 "obs_date": r.obs_date,
-                "value": float(r.value) if r.value else None,
+                "value": float(r.value) if r.value is not None else None,
             }
             for r in results.scalars()
         ]
@@ -453,7 +469,7 @@ class MacroRepository(BaseRepository[FactMacro]):
 
         for record in records:
             record["source_id"] = source_id
-            if run_id:
+            if run_id is not None:
                 record["run_id"] = run_id
 
             existing = self.get_by_series_date(record["series_id"], record["obs_date"])
@@ -462,7 +478,7 @@ class MacroRepository(BaseRepository[FactMacro]):
                 existing.value = record["value"]
                 updated += 1
             else:
-                self.session.add(FactMacro(**record))
+                self.session.add(FactMacro(**_clean_record_for_insert(record)))
                 inserted += 1
 
         self.session.flush()
@@ -514,7 +530,7 @@ class FeatureRepository(BaseRepository[FactFeature]):
                 "instrument_id": r.instrument_id,
                 "trade_date": r.trade_date,
                 "feature_name": r.feature_name,
-                "value": float(r.value) if r.value else None,
+                "value": float(r.value) if r.value is not None else None,
             }
             for r in results
         ]
@@ -543,7 +559,7 @@ class FeatureRepository(BaseRepository[FactFeature]):
         updated = 0
 
         for record in records:
-            if run_id:
+            if run_id is not None:
                 record["run_id"] = run_id
 
             existing = self.get_by_key(
@@ -553,10 +569,12 @@ class FeatureRepository(BaseRepository[FactFeature]):
             )
 
             if existing:
-                existing.value = record["value"]
+                for key, value in record.items():
+                    if hasattr(existing, key) and not _is_missing(value):
+                        setattr(existing, key, value)
                 updated += 1
             else:
-                self.session.add(FactFeature(**record))
+                self.session.add(FactFeature(**_clean_record_for_insert(record)))
                 inserted += 1
 
         self.session.flush()

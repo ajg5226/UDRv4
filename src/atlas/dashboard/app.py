@@ -6,6 +6,7 @@ from typing import Optional
 
 import pandas as pd
 import streamlit as st
+from sqlalchemy import select
 
 # Page config must be first Streamlit command
 st.set_page_config(
@@ -15,10 +16,12 @@ st.set_page_config(
     initial_sidebar_state="expanded",
 )
 
-from atlas.dashboard.auth import check_authentication, show_login
-from atlas.core.config import get_settings
+from atlas.core.config import get_settings, is_development_environment
+from atlas.core.exceptions import ConfigurationError
 from atlas.core.logging import setup_logging
+from atlas.dashboard.auth import check_authentication, show_login
 from atlas.storage.database import get_database
+from atlas.storage.models import PipelineRun
 from atlas.storage.repository import (
     InstrumentRepository,
     MacroRepository,
@@ -40,6 +43,8 @@ def main() -> None:
         if not check_authentication():
             show_login()
             return
+    elif not is_development_environment(settings.environment):
+        raise ConfigurationError("Dashboard authentication cannot be disabled outside development")
     
     # Sidebar navigation
     st.sidebar.title("📊 ATLAS Dashboard")
@@ -114,9 +119,6 @@ def show_overview_page() -> None:
     with db.session() as session:
         run_repo = PipelineRunRepository(session)
         # Get recent runs (simple query)
-        from sqlalchemy import select
-        from atlas.storage.models import PipelineRun
-        
         stmt = select(PipelineRun).order_by(PipelineRun.start_time.desc()).limit(10)
         runs = list(session.scalars(stmt))
         
@@ -369,9 +371,6 @@ def show_pipeline_runs_page() -> None:
     
     # Fetch runs
     with db.session() as session:
-        from sqlalchemy import select
-        from atlas.storage.models import PipelineRun
-        
         stmt = select(PipelineRun).order_by(PipelineRun.start_time.desc()).limit(100)
         
         if run_type_filter != "All":
