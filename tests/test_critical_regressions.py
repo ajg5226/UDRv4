@@ -64,7 +64,7 @@ def test_production_dashboard_requires_configured_users(monkeypatch: pytest.Monk
 def test_production_dashboard_uses_configured_secret_not_default(
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
-    password_hash = hashlib.sha256("s3cret".encode()).hexdigest()
+    password_hash = hashlib.sha256(b"s3cret").hexdigest()
     monkeypatch.setenv("ATLAS_ENV", "production")
     monkeypatch.setenv("ATLAS_DASHBOARD_USERS", json.dumps({"ops": password_hash}))
     monkeypatch.delenv("ATLAS_KEYVAULT_URL", raising=False)
