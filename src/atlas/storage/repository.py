@@ -2,12 +2,10 @@
 
 import json
 from datetime import date, datetime
-from typing import Generic, Optional, Type, TypeVar
+from typing import Generic, TypeVar
 
 import pandas as pd
 from sqlalchemy import and_, delete, select, update
-from sqlalchemy.dialects.postgresql import insert as pg_insert
-from sqlalchemy.dialects.sqlite import insert as sqlite_insert
 from sqlalchemy.orm import Session
 
 from atlas.core.logging import get_logger
@@ -28,15 +26,31 @@ logger = get_logger(__name__)
 T = TypeVar("T", bound=Base)
 
 
+def _is_missing(value: object) -> bool:
+    """Return True for values that represent missing provider data."""
+    if value is None:
+        return True
+
+    try:
+        return bool(pd.isna(value))
+    except (TypeError, ValueError):
+        return False
+
+
+def _clean_record_for_insert(record: dict) -> dict:
+    """Convert missing provider values to None before SQLAlchemy insertion."""
+    return {key: None if _is_missing(value) else value for key, value in record.items()}
+
+
 class BaseRepository(Generic[T]):
     """Base repository with common CRUD operations."""
 
-    model: Type[T]
+    model: type[T]
 
     def __init__(self, session: Session) -> None:
         self.session = session
 
-    def get_by_id(self, id_value: int) -> Optional[T]:
+    def get_by_id(self, id_value: int) -> T | None:
         """Get a record by primary key."""
         return self.session.get(self.model, id_value)
 
@@ -67,14 +81,14 @@ class SourceRepository(BaseRepository[DimSource]):
 
     model = DimSource
 
-    def get_by_name(self, name: str) -> Optional[DimSource]:
+    def get_by_name(self, name: str) -> DimSource | None:
         """Get source by name."""
         stmt = select(DimSource).where(DimSource.name == name)
         return self.session.scalar(stmt)
 
     def get_active(self) -> list[DimSource]:
         """Get all active sources."""
-        stmt = select(DimSource).where(DimSource.is_active == True)
+        stmt = select(DimSource).where(DimSource.is_active.is_(True))
         return list(self.session.scalars(stmt))
 
     def get_or_create(self, name: str, provider_type: str, base_url: str = "") -> DimSource:
@@ -95,7 +109,7 @@ class InstrumentRepository(BaseRepository[DimInstrument]):
 
     model = DimInstrument
 
-    def get_by_ticker(self, ticker: str, exchange: Optional[str] = None) -> Optional[DimInstrument]:
+    def get_by_ticker(self, ticker: str, exchange: str | None = None) -> DimInstrument | None:
         """Get instrument by ticker (and optionally exchange)."""
         stmt = select(DimInstrument).where(DimInstrument.ticker == ticker)
         if exchange:
@@ -109,32 +123,29 @@ class InstrumentRepository(BaseRepository[DimInstrument]):
 
     def get_active(self) -> list[DimInstrument]:
         """Get all active instruments."""
-        stmt = select(DimInstrument).where(DimInstrument.is_active == True)
+        stmt = select(DimInstrument).where(DimInstrument.is_active.is_(True))
         return list(self.session.scalars(stmt))
 
     def get_by_tags(self, tags: list[str]) -> list[DimInstrument]:
         """Get instruments that have any of the specified tags."""
         stmt = (
-            select(DimInstrument)
-            .join(InstrumentTag)
-            .where(InstrumentTag.tag.in_(tags))
-            .distinct()
+            select(DimInstrument).join(InstrumentTag).where(InstrumentTag.tag.in_(tags)).distinct()
         )
         return list(self.session.scalars(stmt))
 
     def get_by_asset_type(self, asset_type: str) -> list[DimInstrument]:
         """Get instruments by asset type."""
         stmt = select(DimInstrument).where(
-            and_(DimInstrument.asset_type == asset_type, DimInstrument.is_active == True)
+            and_(DimInstrument.asset_type == asset_type, DimInstrument.is_active.is_(True))
         )
         return list(self.session.scalars(stmt))
 
     def upsert_from_dataframe(self, df: pd.DataFrame) -> int:
         """
         Upsert instruments from a DataFrame.
-        
+
         Expected columns: ticker, name, exchange, asset_type, currency, sector, industry
-        
+
         Returns count of records processed.
         """
         if df.empty:
@@ -195,7 +206,7 @@ class MacroSeriesRepository(BaseRepository[DimMacroSeries]):
 
     model = DimMacroSeries
 
-    def get_by_fred_id(self, fred_id: str) -> Optional[DimMacroSeries]:
+    def get_by_fred_id(self, fred_id: str) -> DimMacroSeries | None:
         """Get series by FRED ID."""
         stmt = select(DimMacroSeries).where(DimMacroSeries.fred_id == fred_id)
         return self.session.scalar(stmt)
@@ -203,13 +214,13 @@ class MacroSeriesRepository(BaseRepository[DimMacroSeries]):
     def get_by_category(self, category: str) -> list[DimMacroSeries]:
         """Get series by category."""
         stmt = select(DimMacroSeries).where(
-            and_(DimMacroSeries.category == category, DimMacroSeries.is_active == True)
+            and_(DimMacroSeries.category == category, DimMacroSeries.is_active.is_(True))
         )
         return list(self.session.scalars(stmt))
 
     def get_active(self) -> list[DimMacroSeries]:
         """Get all active series."""
-        stmt = select(DimMacroSeries).where(DimMacroSeries.is_active == True)
+        stmt = select(DimMacroSeries).where(DimMacroSeries.is_active.is_(True))
         return list(self.session.scalars(stmt))
 
     def get_or_create(
@@ -241,7 +252,7 @@ class OHLCVRepository(BaseRepository[FactOHLCV]):
         self,
         instrument_id: int,
         trade_date: date,
-    ) -> Optional[FactOHLCV]:
+    ) -> FactOHLCV | None:
         """Get OHLCV record for instrument and date."""
         stmt = select(FactOHLCV).where(
             and_(
@@ -271,7 +282,7 @@ class OHLCVRepository(BaseRepository[FactOHLCV]):
         )
         return list(self.session.scalars(stmt))
 
-    def get_latest(self, instrument_id: int) -> Optional[FactOHLCV]:
+    def get_latest(self, instrument_id: int) -> FactOHLCV | None:
         """Get most recent OHLCV record for instrument."""
         stmt = (
             select(FactOHLCV)
@@ -283,13 +294,13 @@ class OHLCVRepository(BaseRepository[FactOHLCV]):
 
     def get_as_dataframe(
         self,
-        instrument_ids: Optional[list[int]] = None,
-        start_date: Optional[date] = None,
-        end_date: Optional[date] = None,
+        instrument_ids: list[int] | None = None,
+        start_date: date | None = None,
+        end_date: date | None = None,
     ) -> pd.DataFrame:
         """Get OHLCV data as a DataFrame."""
         stmt = select(FactOHLCV)
-        
+
         conditions = []
         if instrument_ids:
             conditions.append(FactOHLCV.instrument_id.in_(instrument_ids))
@@ -297,26 +308,26 @@ class OHLCVRepository(BaseRepository[FactOHLCV]):
             conditions.append(FactOHLCV.trade_date >= start_date)
         if end_date:
             conditions.append(FactOHLCV.trade_date <= end_date)
-        
+
         if conditions:
             stmt = stmt.where(and_(*conditions))
-        
+
         stmt = stmt.order_by(FactOHLCV.instrument_id, FactOHLCV.trade_date)
-        
+
         results = self.session.execute(stmt)
         records = [
             {
                 "instrument_id": r.instrument_id,
                 "trade_date": r.trade_date,
-                "open": float(r.open) if r.open else None,
-                "high": float(r.high) if r.high else None,
-                "low": float(r.low) if r.low else None,
-                "close": float(r.close) if r.close else None,
+                "open": float(r.open) if r.open is not None else None,
+                "high": float(r.high) if r.high is not None else None,
+                "low": float(r.low) if r.low is not None else None,
+                "close": float(r.close) if r.close is not None else None,
                 "volume": r.volume,
-                "adj_open": float(r.adj_open) if r.adj_open else None,
-                "adj_high": float(r.adj_high) if r.adj_high else None,
-                "adj_low": float(r.adj_low) if r.adj_low else None,
-                "adj_close": float(r.adj_close) if r.adj_close else None,
+                "adj_open": float(r.adj_open) if r.adj_open is not None else None,
+                "adj_high": float(r.adj_high) if r.adj_high is not None else None,
+                "adj_low": float(r.adj_low) if r.adj_low is not None else None,
+                "adj_close": float(r.adj_close) if r.adj_close is not None else None,
                 "adj_volume": r.adj_volume,
             }
             for r in results.scalars()
@@ -327,11 +338,11 @@ class OHLCVRepository(BaseRepository[FactOHLCV]):
         self,
         records: list[dict],
         source_id: int,
-        run_id: Optional[int] = None,
+        run_id: int | None = None,
     ) -> tuple[int, int]:
         """
         Upsert a batch of OHLCV records.
-        
+
         Returns (inserted_count, updated_count).
         """
         if not records:
@@ -342,7 +353,7 @@ class OHLCVRepository(BaseRepository[FactOHLCV]):
 
         for record in records:
             record["source_id"] = source_id
-            if run_id:
+            if run_id is not None:
                 record["run_id"] = run_id
 
             existing = self.get_by_instrument_date(
@@ -353,12 +364,12 @@ class OHLCVRepository(BaseRepository[FactOHLCV]):
             if existing:
                 # Update
                 for key, value in record.items():
-                    if hasattr(existing, key):
+                    if hasattr(existing, key) and not _is_missing(value):
                         setattr(existing, key, value)
                 updated += 1
             else:
                 # Insert
-                self.session.add(FactOHLCV(**record))
+                self.session.add(FactOHLCV(**_clean_record_for_insert(record)))
                 inserted += 1
 
         self.session.flush()
@@ -374,7 +385,7 @@ class MacroRepository(BaseRepository[FactMacro]):
         self,
         series_id: int,
         obs_date: date,
-    ) -> Optional[FactMacro]:
+    ) -> FactMacro | None:
         """Get macro record for series and date."""
         stmt = select(FactMacro).where(
             and_(
@@ -406,14 +417,14 @@ class MacroRepository(BaseRepository[FactMacro]):
 
     def get_as_dataframe(
         self,
-        series_ids: Optional[list[int]] = None,
-        category: Optional[str] = None,
-        start_date: Optional[date] = None,
-        end_date: Optional[date] = None,
+        series_ids: list[int] | None = None,
+        category: str | None = None,
+        start_date: date | None = None,
+        end_date: date | None = None,
     ) -> pd.DataFrame:
         """Get macro data as a DataFrame."""
         stmt = select(FactMacro).join(DimMacroSeries)
-        
+
         conditions = []
         if series_ids:
             conditions.append(FactMacro.series_id.in_(series_ids))
@@ -423,16 +434,16 @@ class MacroRepository(BaseRepository[FactMacro]):
             conditions.append(FactMacro.obs_date >= start_date)
         if end_date:
             conditions.append(FactMacro.obs_date <= end_date)
-        
+
         if conditions:
             stmt = stmt.where(and_(*conditions))
-        
+
         results = self.session.execute(stmt)
         records = [
             {
                 "series_id": r.series_id,
                 "obs_date": r.obs_date,
-                "value": float(r.value) if r.value else None,
+                "value": float(r.value) if r.value is not None else None,
             }
             for r in results.scalars()
         ]
@@ -442,7 +453,7 @@ class MacroRepository(BaseRepository[FactMacro]):
         self,
         records: list[dict],
         source_id: int,
-        run_id: Optional[int] = None,
+        run_id: int | None = None,
     ) -> tuple[int, int]:
         """Upsert a batch of macro records."""
         if not records:
@@ -453,7 +464,7 @@ class MacroRepository(BaseRepository[FactMacro]):
 
         for record in records:
             record["source_id"] = source_id
-            if run_id:
+            if run_id is not None:
                 record["run_id"] = run_id
 
             existing = self.get_by_series_date(record["series_id"], record["obs_date"])
@@ -462,7 +473,7 @@ class MacroRepository(BaseRepository[FactMacro]):
                 existing.value = record["value"]
                 updated += 1
             else:
-                self.session.add(FactMacro(**record))
+                self.session.add(FactMacro(**_clean_record_for_insert(record)))
                 inserted += 1
 
         self.session.flush()
@@ -479,7 +490,7 @@ class FeatureRepository(BaseRepository[FactFeature]):
         instrument_id: int,
         trade_date: date,
         feature_name: str,
-    ) -> Optional[FactFeature]:
+    ) -> FactFeature | None:
         """Get feature record by composite key."""
         stmt = select(FactFeature).where(
             and_(
@@ -493,33 +504,33 @@ class FeatureRepository(BaseRepository[FactFeature]):
     def get_features_for_date(
         self,
         trade_date: date,
-        feature_names: Optional[list[str]] = None,
-        instrument_ids: Optional[list[int]] = None,
+        feature_names: list[str] | None = None,
+        instrument_ids: list[int] | None = None,
     ) -> pd.DataFrame:
         """Get all features for a date as a DataFrame (pivoted by feature name)."""
         stmt = select(FactFeature).where(FactFeature.trade_date == trade_date)
-        
+
         if feature_names:
             stmt = stmt.where(FactFeature.feature_name.in_(feature_names))
         if instrument_ids:
             stmt = stmt.where(FactFeature.instrument_id.in_(instrument_ids))
-        
+
         results = list(self.session.scalars(stmt))
-        
+
         if not results:
             return pd.DataFrame()
-        
+
         records = [
             {
                 "instrument_id": r.instrument_id,
                 "trade_date": r.trade_date,
                 "feature_name": r.feature_name,
-                "value": float(r.value) if r.value else None,
+                "value": float(r.value) if r.value is not None else None,
             }
             for r in results
         ]
         df = pd.DataFrame(records)
-        
+
         # Pivot to wide format
         if not df.empty:
             df = df.pivot(
@@ -527,13 +538,13 @@ class FeatureRepository(BaseRepository[FactFeature]):
                 columns="feature_name",
                 values="value",
             ).reset_index()
-        
+
         return df
 
     def upsert_batch(
         self,
         records: list[dict],
-        run_id: Optional[int] = None,
+        run_id: int | None = None,
     ) -> tuple[int, int]:
         """Upsert a batch of feature records."""
         if not records:
@@ -543,7 +554,7 @@ class FeatureRepository(BaseRepository[FactFeature]):
         updated = 0
 
         for record in records:
-            if run_id:
+            if run_id is not None:
                 record["run_id"] = run_id
 
             existing = self.get_by_key(
@@ -553,10 +564,12 @@ class FeatureRepository(BaseRepository[FactFeature]):
             )
 
             if existing:
-                existing.value = record["value"]
+                for key, value in record.items():
+                    if hasattr(existing, key) and not _is_missing(value):
+                        setattr(existing, key, value)
                 updated += 1
             else:
-                self.session.add(FactFeature(**record))
+                self.session.add(FactFeature(**_clean_record_for_insert(record)))
                 inserted += 1
 
         self.session.flush()
@@ -572,8 +585,8 @@ class PipelineRunRepository(BaseRepository[PipelineRun]):
         self,
         run_type: str,
         run_date: date,
-        providers: Optional[list[str]] = None,
-        tags_filter: Optional[list[str]] = None,
+        providers: list[str] | None = None,
+        tags_filter: list[str] | None = None,
     ) -> PipelineRun:
         """Create a new pipeline run record."""
         run = PipelineRun(
@@ -593,7 +606,7 @@ class PipelineRunRepository(BaseRepository[PipelineRun]):
         status: str,
         records_inserted: int = 0,
         records_updated: int = 0,
-        errors: Optional[str] = None,
+        errors: str | None = None,
     ) -> None:
         """Mark a run as complete."""
         stmt = (
@@ -610,7 +623,7 @@ class PipelineRunRepository(BaseRepository[PipelineRun]):
         self.session.execute(stmt)
         self.session.flush()
 
-    def get_latest_run(self, run_type: Optional[str] = None) -> Optional[PipelineRun]:
+    def get_latest_run(self, run_type: str | None = None) -> PipelineRun | None:
         """Get the most recent pipeline run."""
         stmt = select(PipelineRun).order_by(PipelineRun.start_time.desc())
         if run_type:
@@ -626,7 +639,7 @@ class PipelineRunRepository(BaseRepository[PipelineRun]):
         )
         return list(self.session.scalars(stmt))
 
-    def get_failed_runs(self, since: Optional[datetime] = None) -> list[PipelineRun]:
+    def get_failed_runs(self, since: datetime | None = None) -> list[PipelineRun]:
         """Get failed runs, optionally since a specific time."""
         stmt = select(PipelineRun).where(PipelineRun.status == "failed")
         if since:
