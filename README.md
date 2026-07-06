@@ -61,6 +61,19 @@ ATLAS_DB_CONNECTION=sqlite:///atlas_dev.db
 atlas init-db
 ```
 
+For local validation with SQLite, use the checked-in harness:
+
+```bash
+export ATLAS_ENV=development
+export ATLAS_DB_CONNECTION="sqlite:///atlas_dev.db"
+python scripts/validate_local.py
+```
+
+The validation script creates the schema, loads instruments from
+`ATLAS_INPUT_TEMPLATE_V1.csv`, validates the Feature Engine V2 schema and
+generators with sample data, and confirms the pipeline objects can be created
+without making external API calls.
+
 ### Run the Pipeline
 
 ```bash
@@ -75,7 +88,15 @@ atlas run --providers tiingo,fred
 
 # Run for instruments with specific tags
 atlas run --tags portfolio_main
+
+# Skip the feature calculation hook
+atlas run --skip-features
 ```
+
+**Current feature status:** `atlas run` and `atlas backfill` expose a
+`--skip-features` flag, but the orchestrator's feature-calculation hook is
+currently a placeholder. Use the standalone Feature Engine V2 API described
+below when you need to calculate and persist feature rows.
 
 ### Backfill Historical Data
 
@@ -99,6 +120,10 @@ Then open http://localhost:8501 in your browser.
 - Username: `admin` or `analyst`
 - Password: `atlas123`
 
+Dashboard authentication is login-only in the current app. The `admin` and
+`analyst` users can access the same dashboard pages; page-level RBAC is a
+planned production hardening step.
+
 ## Project Structure
 
 ```
@@ -110,7 +135,7 @@ UDRv4/
 │   ├── instruments/           # Instrument configs
 │   │   └── tags.yaml          # Tag definitions
 │   └── features/              # Feature configs
-│       └── registry.yaml      # Feature definitions
+│       └── registry.yaml      # Legacy feature registry; V2 uses src/atlas/features/schema.py
 ├── src/atlas/                  # Main package
 │   ├── core/                  # Core utilities
 │   │   ├── config.py          # Configuration management
@@ -130,9 +155,11 @@ UDRv4/
 │   │   ├── database.py        # Connection management
 │   │   └── repository.py      # Data access layer
 │   ├── features/              # Feature engineering
-│   │   ├── base.py            # Base feature class
-│   │   ├── registry.py        # Feature registry
-│   │   └── engine.py          # Calculation engine
+│   │   ├── schema.py          # V2 feature catalog
+│   │   ├── generators.py      # V2 family calculators
+│   │   ├── transforms.py      # Cross-sectional transforms
+│   │   ├── engine_v2.py       # V2 calculation engine
+│   │   └── engine.py          # Legacy calculation engine
 │   ├── dashboard/             # Streamlit app
 │   │   ├── app.py             # Main dashboard
 │   │   └── auth.py            # Authentication
@@ -142,7 +169,9 @@ UDRv4/
 │   └── azure/                 # Azure Bicep templates
 ├── docs/                      # Documentation
 │   └── ARCHITECTURE_DOCUMENT.md
-├── tests/                     # Test suite
+├── scripts/                   # Local validation and backfill helpers
+├── ATLAS_INPUT_TEMPLATE_V1.csv # Local instrument bootstrap CSV
+├── ATLAS_V1_PRD.md            # Product requirements
 ├── pyproject.toml             # Project configuration
 └── README.md                  # This file
 ```
@@ -151,16 +180,23 @@ UDRv4/
 
 | Command | Description |
 |---------|-------------|
-| `atlas run` | Execute pipeline for a date |
-| `atlas backfill` | Run historical backfill |
+| `atlas run [--date YYYY-MM-DD] [--providers tiingo,fred] [--tags tag] [--skip-features]` | Execute pipeline for a date |
+| `atlas backfill --start YYYY-MM-DD --end YYYY-MM-DD [--batch-size 30] [--dry-run] [--skip-features]` | Run historical backfill |
 | `atlas status` | Show pipeline status |
 | `atlas init-db` | Initialize database schema |
 | `atlas instruments list` | List active instruments |
 | `atlas instruments add-tag` | Add tag to instrument |
+| `atlas instruments remove-tag` | Remove tag from instrument |
 | `atlas dashboard` | Launch Streamlit dashboard |
 | `atlas version` | Show version |
 
+The CLI help mentions `atlas instruments sync`, but that action is not
+implemented yet and returns `Unknown action: sync`.
+
 ## Database Schema
+
+The physical SQLAlchemy table names are singular. Use these names for direct
+SQL, migrations, and troubleshooting.
 
 ### Dimension Tables
 
@@ -172,7 +208,8 @@ UDRv4/
 
 - **fact_ohlcv** - Daily OHLCV price data (raw + adjusted)
 - **fact_macro** - Macroeconomic indicator observations
-- **fact_features** - Calculated feature values
+- **fact_feature** - Calculated feature values with versioning and lineage
+- **feature_diagnostic** - Feature quality metrics such as IC and hit rate
 
 ### Operational Tables
 
@@ -213,34 +250,61 @@ class MyProvider(BaseProvider):
 
 ## Adding New Features
 
-1. Create a feature class inheriting from `BaseFeature`:
+Feature Engine V2 is driven by `src/atlas/features/schema.py`, not by
+`config/features/registry.yaml`. The schema module is the source of truth for
+feature names, families, lookbacks, transforms, data requirements, priority, and
+version metadata.
+
+1. Add a `FeatureDefinition` to `FEATURE_CATALOG` with `register_feature()`:
 
 ```python
-from atlas.features.base import BaseFeature
+from atlas.features.schema import (
+    DataRequirement,
+    Directionality,
+    FeatureDefinition,
+    FeatureFamily,
+    HorizonFamily,
+    TransformType,
+    register_feature,
+)
 
-class MyFeature(BaseFeature):
-    @property
-    def name(self) -> str:
-        return "my_feature"
-    
-    @property
-    def category(self) -> str:
-        return "custom"
-    
-    @property
-    def dependencies(self) -> list[str]:
-        return ["adj_close"]  # Required input data
-    
-    @property
-    def lookback_days(self) -> int:
-        return 20
-    
-    def calculate(self, data, target_date, parameters=None):
-        # Implementation
-        ...
+register_feature(FeatureDefinition(
+    name="my_signal",
+    family=FeatureFamily.MOMENTUM,
+    description="Example signal based on adjusted close history",
+    horizon_family=HorizonFamily.MEDIUM,
+    lookback_days=63,
+    min_history=126,
+    transforms=[TransformType.RAW, TransformType.RANK, TransformType.ZSCORE],
+    requires=[DataRequirement.OHLCV],
+    directionality=Directionality.HIGHER_BETTER,
+    priority=2,
+))
 ```
 
-2. Register in `features/registry.py`
+2. Implement or extend the matching family generator in
+   `src/atlas/features/generators.py`.
+3. Validate with `python scripts/validate_local.py`, which exercises the schema,
+   generators, and transforms with sample data.
+4. For standalone calculation, call the V2 engine:
+
+```python
+import asyncio
+from datetime import date
+
+from atlas.features.engine_v2 import calculate_features
+
+result = asyncio.run(calculate_features(date(2026, 1, 24)))
+print(result.records_written, result.errors)
+```
+
+Feature variants are generated from lookback and transform settings. For
+example, a base feature named `mom_ts` with a 21-day lookback and rank transform
+is stored as `mom_ts_21d_rank` in `fact_feature`.
+
+The legacy `BaseFeature`, `FeatureRegistry`, and `FeatureEngine` modules remain
+in the package for compatibility, but new production features should use Feature
+Engine V2.
 
 ## Azure Deployment
 

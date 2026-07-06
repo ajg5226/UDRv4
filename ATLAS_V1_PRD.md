@@ -13,8 +13,11 @@ The focus is on creating a **scalable, secure, and modular pipeline** that suppo
 - **Integrate Multiple Sources:** Unify data from disparate providers (APIs, databases, files, etc.) into a **single cohesive schema**, giving a holistic view of the information in one place.
 - **Improve Data Quality and Consistency:** Enforce validation and cleaning so that the stored data is accurate, consistent, and free of duplicates or gaps. Include the ability to backfill historical data to maintain a complete dataset.
 - **Scalable & Extensible Design:** Build the pipeline with a modular architecture that can easily **extend to new data sources** or increased data volumes without significant refactoring.
-- **User Accessibility:** Deliver data to end users via an accessible interface (Streamlit dashboard) with appropriate **authentication and role-based access**, so data remains secure but readily available to authorized users.
+- **User Accessibility:** Deliver data to end users via an accessible interface (Streamlit dashboard) with authentication now and role-based access as a production hardening target, so data remains secure but readily available to authorized users.
 - **Operational Transparency:** Provide logging, error handling, and alerting such that the engineering team can monitor pipeline health and quickly address issues (failed runs, data discrepancies, etc.).
+
+**Current implementation note:** The Streamlit dashboard currently enforces
+login only; page-level role restrictions remain a target requirement.
 
 ---
 
@@ -93,13 +96,16 @@ The schema should support:
 - Efficient upserts and indexing.
 - Run metadata to link stored records to pipeline runs.
 
-**Recommended logical tables:**
+**Implemented logical tables:**
 - `dim_source` — provider metadata
 - `dim_instrument` (optional for asset universe) — ticker, exchange, asset_type, status
-- `fact_prices` / `fact_ohlcv` — daily OHLCV (raw + adjusted) keyed by instrument + date
-- `fact_macro_series` — FRED/BLS series keyed by series_id + date
-- `fact_features` — engineered features keyed by instrument + date + feature_name
-- `pipeline_runs` — run-level logs and metrics (status, duration, rows inserted/updated, error text)
+- `dim_macro_series` — FRED series metadata
+- `fact_ohlcv` — daily OHLCV (raw + adjusted) keyed by instrument + date
+- `fact_macro` — FRED observations keyed by series + observation date
+- `fact_feature` — engineered features keyed by instrument + date + feature_name
+- `feature_diagnostic` — feature quality metrics such as IC and hit rate
+- `instrument_tag` — many-to-many instrument tags
+- `pipeline_run` — run-level logs and metrics (status, duration, rows inserted/updated, error text)
 
 **Indexing guidelines:**
 - Composite keys on (instrument_id, trade_date) for price tables.
@@ -107,7 +113,8 @@ The schema should support:
 - (instrument_id, date, feature_name) for feature tables.
 - Add date indexes where date filtering is common.
 
-*(Specific columns and constraints are expected to be finalized during implementation once provider and feature catalog is defined.)*
+See `src/atlas/storage/models.py` for the exact SQLAlchemy schema and
+`docs/ARCHITECTURE_DOCUMENT.md` for column-level details.
 
 ---
 
@@ -126,6 +133,9 @@ The schema should support:
 - Preferred: Azure AD / SSO for enterprise-grade auth and group-based RBAC.
 - Secrets stored in vault (Key Vault or equivalent).
 - DB permissions separated for read vs write.
+
+Current dashboard code uses simple username/password auth. A `require_role()`
+helper exists for future RBAC, but dashboard pages do not call it yet.
 
 ---
 
