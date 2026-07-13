@@ -1,13 +1,13 @@
 # ATLAS V1 - Nightly Data Pipeline for Investment Management
 
-ATLAS is a cloud-native data pipeline system designed for institutional investment management. It automates the collection, processing, and delivery of market data and macroeconomic indicators for quantitative analysis and decision-making.
+ATLAS is a data pipeline system designed for institutional investment management. The current implementation provides CLI-driven ingestion, backfill, storage, and dashboard workflows for market data and macroeconomic indicators. Azure infrastructure and scheduling configuration are present, but the in-repository runtime is not yet wired to an automated scheduler.
 
 ## Features
 
-- **Automated Nightly Pipeline** - Scheduled data collection from multiple providers
+- **CLI-Driven Pipeline** - Manual single-date runs with scheduler-ready configuration
 - **Multi-Provider Architecture** - Modular support for Tiingo, FRED, and future providers
 - **Historical Backfill** - Load and process historical data for any date range
-- **Feature Engineering** - Extensible framework for derived analytics
+- **Feature Engineering Framework** - Feature catalog and generators are implemented; pipeline persistence is not wired yet
 - **Portfolio Tagging** - Tag instruments for portfolio tracking and subset analysis
 - **Macro Data Categorization** - FRED data organized by Growth, Liquidity, Risk Appetite
 - **Streamlit Dashboard** - Web interface for data exploration and monitoring
@@ -47,7 +47,7 @@ export FRED_API_KEY="your_fred_key"
 export ATLAS_DB_CONNECTION="sqlite:///atlas_dev.db"  # Or your SQL connection string
 ```
 
-2. **Or use a `.env` file**:
+2. **Or use a `.env` file for scripts that load it**:
 
 ```env
 TIINGO_API_KEY=your_tiingo_key
@@ -55,10 +55,23 @@ FRED_API_KEY=your_fred_key
 ATLAS_DB_CONNECTION=sqlite:///atlas_dev.db
 ```
 
+The CLI reads process environment variables directly. If you keep values in `.env`, export them before running `atlas` commands, for example:
+
+```bash
+set -a
+source .env
+set +a
+```
+
+`scripts/validate_local.py` loads `.env` itself.
+
 ### Initialize the Database
 
 ```bash
 atlas init-db
+
+# Drop and recreate tables after confirming the prompt
+atlas init-db --force
 ```
 
 ### Run the Pipeline
@@ -75,7 +88,12 @@ atlas run --providers tiingo,fred
 
 # Run for instruments with specific tags
 atlas run --tags portfolio_main
+
+# Skip the placeholder feature calculation hook
+atlas run --skip-features
 ```
+
+`atlas run` records runs as `manual`. The cron expression in `config/default.yaml` is configuration for future scheduler integration; no Azure Functions timer entrypoint is implemented in this repository today.
 
 ### Backfill Historical Data
 
@@ -85,7 +103,12 @@ atlas backfill --start 2020-01-01 --end 2026-01-24
 
 # Dry run to see what would be processed
 atlas backfill --start 2020-01-01 --end 2026-01-24 --dry-run
+
+# Tune batch size and skip the feature hook
+atlas backfill --start 2020-01-01 --end 2026-01-24 --batch-size 10 --skip-features
 ```
+
+Non-dry-run backfills show an estimate and ask `Proceed with backfill?` before fetching data.
 
 ### Launch the Dashboard
 
@@ -154,9 +177,10 @@ UDRv4/
 | `atlas run` | Execute pipeline for a date |
 | `atlas backfill` | Run historical backfill |
 | `atlas status` | Show pipeline status |
-| `atlas init-db` | Initialize database schema |
+| `atlas init-db [--force]` | Initialize database schema; `--force` drops existing tables after confirmation |
 | `atlas instruments list` | List active instruments |
 | `atlas instruments add-tag` | Add tag to instrument |
+| `atlas instruments remove-tag` | Remove tag from instrument |
 | `atlas dashboard` | Launch Streamlit dashboard |
 | `atlas version` | Show version |
 
@@ -172,7 +196,7 @@ UDRv4/
 
 - **fact_ohlcv** - Daily OHLCV price data (raw + adjusted)
 - **fact_macro** - Macroeconomic indicator observations
-- **fact_features** - Calculated feature values
+- **fact_feature** - Calculated feature values; table exists, but the pipeline feature calculation hook is currently a placeholder
 
 ### Operational Tables
 
@@ -269,9 +293,11 @@ export SQL_ADMIN_PASSWORD="your_secure_password"
    - `fred-api-key`
    - `atlas-db-connection`
 
-2. Deploy application code to Function App
+2. Add an application entrypoint before deploying pipeline code to Function App. The repository includes Azure Function infrastructure, but no timer-trigger function host is currently implemented.
 
-3. Deploy dashboard container to Container Apps
+3. Deploy dashboard container to Container Apps.
+
+4. Run ingestion through the CLI (`atlas run` or `atlas backfill`) until scheduler integration is added.
 
 ## Environment Variables
 
@@ -310,6 +336,16 @@ ATLAS organizes ~100 FRED series into three categories:
 - Inflation expectations
 
 ## Development
+
+### Local Validation
+
+Use the local validation script before Azure deployment or after changing provider, schema, or feature code:
+
+```bash
+poetry run python scripts/validate_local.py
+```
+
+The script loads `.env`, creates local SQLite tables if needed, loads instruments from `ATLAS_INPUT_TEMPLATE_V1.csv`, validates provider initialization, checks the feature schema/generators/transforms, and imports the pipeline orchestrator without making live data fetches.
 
 ### Running Tests
 

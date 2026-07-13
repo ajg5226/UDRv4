@@ -5,6 +5,10 @@ The ATLAS V1 Nightly Data Pipeline is a **cloud-based data ingestion and process
 
 The focus is on creating a **scalable, secure, and modular pipeline** that supports future growth (additional data sources, increased volume) while ensuring data accuracy (including mechanisms for **backfilling** historical data to fill any gaps).
 
+### Implementation Status
+
+As of 2026-07-13, the repository implements the provider adapters, CLI workflows, SQLAlchemy storage, historical backfill manager, feature catalog/generators, and Streamlit dashboard. The nightly scheduler, raw archive writer, alert sender, and pipeline-to-feature persistence remain target-state requirements rather than wired runtime behavior. Use `atlas run`, `atlas backfill`, `atlas status`, and `scripts/validate_local.py` for the implemented operational workflow.
+
 ---
 
 ## Project Objectives
@@ -78,7 +82,7 @@ The focus is on creating a **scalable, secure, and modular pipeline** that suppo
 - Differentiate backfill runs in logs and run metadata.
 
 ### System Components
-- **Orchestration:** Azure Functions Timer Trigger (or equivalent).
+- **Target orchestration:** Azure Functions Timer Trigger (or equivalent). Current checked-in execution is CLI-driven.
 - **Optional Raw Archive:** Azure Blob / object storage for raw payloads and staging.
 - **Target Storage:** Azure SQL MI (or equivalent relational DB).
 - **UI:** Streamlit app querying the DB.
@@ -96,10 +100,10 @@ The schema should support:
 **Recommended logical tables:**
 - `dim_source` — provider metadata
 - `dim_instrument` (optional for asset universe) — ticker, exchange, asset_type, status
-- `fact_prices` / `fact_ohlcv` — daily OHLCV (raw + adjusted) keyed by instrument + date
-- `fact_macro_series` — FRED/BLS series keyed by series_id + date
-- `fact_features` — engineered features keyed by instrument + date + feature_name
-- `pipeline_runs` — run-level logs and metrics (status, duration, rows inserted/updated, error text)
+- `fact_ohlcv` — daily OHLCV (raw + adjusted) keyed by instrument + date
+- `fact_macro` — FRED observations keyed by series_id + observation date
+- `fact_feature` — engineered features keyed by instrument + date + feature_name; table exists, but the pipeline does not populate it yet
+- `pipeline_run` — run-level logs and metrics (status, duration, rows inserted/updated, error text)
 
 **Indexing guidelines:**
 - Composite keys on (instrument_id, trade_date) for price tables.
