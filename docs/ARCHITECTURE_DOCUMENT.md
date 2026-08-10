@@ -3,8 +3,8 @@
 ## Document Information
 | Field | Value |
 |-------|-------|
-| Version | 1.0.2 |
-| Last Updated | 2026-08-03 |
+| Version | 1.0.3 |
+| Last Updated | 2026-08-10 |
 | Status | Implementation status and target architecture |
 
 ---
@@ -633,7 +633,7 @@ pipeline:
     max_attempts: 3
     backoff_seconds: [60, 300, 900]
   
-  parallel_providers: true
+  parallel_providers: true  # Settings-only today; RunConfig.parallel defaults True
   batch_size_days: 30
 
 database:
@@ -661,6 +661,8 @@ notifications:
 ```
 
 The raw archive and notification blocks are configuration only in the current codebase. The CLI and dashboard read process environment variables directly and do **not** call `load_dotenv()`. Only `scripts/validate_local.py` and `scripts/backfill_5year.py` load `.env` automatically.
+
+`pipeline.parallel_providers` is also settings-only: `atlas run` / `BackfillManager` construct `RunConfig` without copying the YAML value, so provider concurrency follows `RunConfig.parallel` (default `True`). Setting `parallel_providers: false` in `config/environments/development.yaml` does not serialize provider execution.
 
 `logging.app_insights` is likewise configuration-only: `setup_logging()` configures structlog/stdlib logging and does not attach an Application Insights / OpenCensus exporter, even though the Azure exporter package is declared as a dependency.
 
@@ -852,9 +854,10 @@ atlas status
 | Initialize local database | `atlas init-db` |
 | Recreate local database | `atlas init-db --force` after confirming the destructive prompt |
 | Validate local setup | `python3 scripts/validate_local.py` (loads `.env`, seeds instruments from `ATLAS_INPUT_TEMPLATE_V1.csv`) |
-| Bulk historical helper | `python3 scripts/backfill_5year.py` (loads `.env`; separate from `atlas backfill`) |
+| Bulk historical helper | `python3 scripts/backfill_5year.py` (loads `.env`; separate from `atlas backfill`; FRED path currently looks for `date` while provider returns `obs_date`) |
+| Macro/history via CLI | Prefer `atlas backfill --providers fred` (or `tiingo,fred`) for correct column mapping |
 | Launch dashboard | From repo root: `atlas dashboard` |
-| Standalone features | Call `atlas.features.calculate_features(...)` after OHLCV history exists |
+| Standalone features | Call `atlas.features.calculate_features(...)` after OHLCV history exists; dashboard Features page is a V1 stub, not the catalog |
 | Add provider | Create provider class, register it in `src/atlas/providers/registry.py`, and add configuration if needed |
 | Add feature | Register in `src/atlas/features/schema.py`; wire orchestrator to `FeatureEngineV2` before expecting pipeline output |
 | View logs | CLI output or configured structured logs; Application Insights is target-state |
@@ -870,6 +873,9 @@ atlas status
 | Default dashboard passwords in shared envs | Auth falls back to development defaults when `ATLAS_DASHBOARD_USERS` is unset/invalid |
 | Poetry install missing `scipy` | Feature V2 imports scipy; package is in `requirements.txt` but not `pyproject.toml` |
 | Unused instrument/feature YAML paths | `universe_csv`, `tags_config`, and `registry_config` are settings strings only |
+| `parallel_providers: false` ignored | YAML → settings only; CLI/backfill never set `RunConfig.parallel` |
+| `backfill_5year.py` skips FRED rows | Helper reads `row["date"]`; `FredProvider.fetch_date_range` emits `obs_date` |
+| Dashboard Features page as catalog | Stub lists hard-coded V1 names and claims pipeline calculation; use `FEATURE_CATALOG` |
 | Expecting App Insights from YAML alone | `logging.app_insights` is not wired in `setup_logging()` |
 
 ---

@@ -7,15 +7,15 @@ The focus is on creating a **scalable, secure, and modular pipeline** that suppo
 
 ### Implementation Status
 
-As of 2026-08-03, the repository implements the provider adapters, CLI workflows, SQLAlchemy storage, historical backfill manager, Feature Engine V2 catalog/generators (`FEATURE_CATALOG`), and a login-gated Streamlit dashboard. The nightly scheduler, raw archive writer, alert sender, orchestrator→feature persistence, dashboard role enforcement, production fail-closed auth, App Insights exporter wiring, and Alembic migration tree remain target-state requirements rather than wired runtime behavior.
+As of 2026-08-10, the repository implements the provider adapters, CLI workflows, SQLAlchemy storage, historical backfill manager, Feature Engine V2 catalog/generators (`FEATURE_CATALOG`), and a login-gated Streamlit dashboard. The nightly scheduler, raw archive writer, alert sender, orchestrator→feature persistence, dashboard role enforcement, production fail-closed auth, App Insights exporter wiring, and Alembic migration tree remain target-state requirements rather than wired runtime behavior.
 
 Implemented operational workflow today:
 - `atlas run` / `atlas backfill` / `atlas status` / `atlas init-db`
 - `python3 scripts/validate_local.py` (loads `.env`, seeds instruments from `ATLAS_INPUT_TEMPLATE_V1.csv`)
-- `python3 scripts/backfill_5year.py` (optional bulk helper; loads `.env`)
+- `python3 scripts/backfill_5year.py` (optional bulk helper; loads `.env`; FRED persistence currently mismatched on `date` vs `obs_date` — prefer `atlas backfill` for macro)
 - Standalone feature calculation via `atlas.features.calculate_features(...)` after OHLCV history exists (requires `scipy`; present in `requirements.txt`, not yet in `pyproject.toml`)
 
-Config paths such as `config/features/registry.yaml`, `config/instruments/tags.yaml`, and `config/instruments/universe.csv` are referenced in settings but are not loaded by runtime feature/instrument codepaths; treat them as legacy or future wiring unless source shows otherwise.
+Config paths such as `config/features/registry.yaml`, `config/instruments/tags.yaml`, `config/instruments/universe.csv`, and `pipeline.parallel_providers` are referenced in settings but are not consumed by the corresponding runtime codepaths; treat them as legacy or future wiring unless source shows otherwise. The dashboard Features page is a stub (hard-coded V1 names), not the V2 catalog.
 
 ---
 
