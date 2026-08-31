@@ -5,6 +5,30 @@ The ATLAS V1 Nightly Data Pipeline is a **cloud-based data ingestion and process
 
 The focus is on creating a **scalable, secure, and modular pipeline** that supports future growth (additional data sources, increased volume) while ensuring data accuracy (including mechanisms for **backfilling** historical data to fill any gaps).
 
+### Implementation Status
+
+As of 2026-08-31, the repository implements the provider adapters, CLI workflows, SQLAlchemy storage, historical backfill manager, Feature Engine V2 catalog/generators (`FEATURE_CATALOG`: 36 base / 139 variants), and a login-gated Streamlit dashboard. The nightly scheduler, raw archive writer, alert sender, orchestrator→feature persistence, dashboard role enforcement, production fail-closed auth, App Insights exporter wiring, holiday calendar, CLI `--instruments`, enforced provider rate limits, Key Vault dashboard users, and Alembic migration tree remain target-state requirements rather than wired runtime behavior.
+
+Implemented operational workflow today:
+- `atlas run` / `atlas backfill` / `atlas status` / `atlas init-db` (schema also created on first orchestrator `initialize()`)
+- `python3 scripts/validate_local.py` (loads `.env`, seeds instruments from `ATLAS_INPUT_TEMPLATE_V1.csv`)
+- `python3 scripts/backfill_5year.py` (optional bulk **range-fetch** helper for OHLCV; loads `.env`; FRED persistence currently mismatched on `date` vs `obs_date` — prefer `atlas backfill --providers fred` for macro)
+- Standalone feature calculation via `atlas.features.calculate_features(...)` after OHLCV history exists (requires `scipy`; present in `requirements.txt`, not yet in `pyproject.toml`)
+
+Config paths such as `config/features/registry.yaml`, `config/instruments/tags.yaml`, `config/instruments/universe.csv`, `pipeline.parallel_providers`, `pipeline.retry`, `providers.*.rate_limit_*`, and `dashboard.auth.users_secret` are referenced in settings but are not consumed by the corresponding runtime codepaths; treat them as legacy or future wiring unless source shows otherwise. The dashboard Features page is a stub (hard-coded V1 names), not the V2 catalog.
+
+Additional verified constraints:
+- Unscoped `atlas run` (no `--tags`) asks Tiingo for the full daily universe; seeded CSV rows are used only when tagged.
+- `atlas backfill` is per-weekday `fetch_data`, not `fetch_date_range`. Multi-year Tiingo history via the CLI is one HTTP call per ticker per weekday.
+- HTTP 429 is not retried; tenacity covers timeout/network only. YAML rate-limit and `pipeline.retry` values are unused.
+- FRED single-date fetches persist only observations whose `obs_date` equals that weekday; monthly/quarterly series typically miss a nightly run.
+- Persist writes only the hard-coded provider names `"tiingo"` and `"fred"`. Validation warnings/errors do not block upsert.
+- Backfill skips weekends by default and does **not** skip holidays. `resume_from` is not a CLI flag.
+- OHLCV upserts overwrite existing fields with `None`/NaN; DataFrame readback treats numeric `0` as missing.
+- Feature upserts on existing keys update `value` only (lineage columns stale on recalculation).
+- Dashboard auth reads `ATLAS_DASHBOARD_USERS` only; Key Vault `atlas-dashboard-users` is unused; login always shows default credentials.
+- `ATLAS_ENV` means `development`/`production` for YAML overlays, `dev`/`staging`/`prod` for `deploy.sh` resource names, and is hard-set to `production` on the Function App in Bicep.
+
 ---
 
 ## Project Objectives
@@ -27,17 +51,17 @@ The focus is on creating a **scalable, secure, and modular pipeline** that suppo
 ---
 
 ## Functional Requirements
-- **Nightly Automated Run:** The pipeline shall **execute automatically on a nightly schedule** (e.g., every day at midnight). This scheduler will trigger the data ingestion process without manual intervention.
+- **Nightly Automated Run:** The pipeline shall **execute automatically on a nightly schedule** (e.g., every day at midnight). *Status: target-state.* Cron configuration exists in YAML; current execution is CLI/manual (`atlas run`).
 - **Multiple Data Source Ingestion:** The system shall connect to and retrieve data from all configured external sources. Each source’s integration is handled through a modular provider component and should support **API keys or credentials** as needed.
 - **Data Transformation & Cleaning:** The pipeline shall perform any necessary transformations on incoming data. This includes parsing or converting formats, data type conversions, handling missing values, and applying business rules for cleaning. If multiple sources provide overlapping data, the pipeline should merge or reconcile them (following predefined logic).
 - **Centralized Data Storage:** All processed data shall be stored in a relational database (e.g., **Azure SQL Managed Instance** or equivalent). The pipeline should upsert or append new records each night without duplicating existing data.
 - **Historical Backfill:** The pipeline shall support a mode to **backfill historical data** by running for a specified past date range to populate the database with data from days prior to the pipeline’s introduction (or to fill gaps caused by past failures).
 - **Data Quality Validation:** The system shall validate data at critical points. If a data source returns an empty or malformed dataset, the pipeline should detect it and flag an error (possibly skipping that source’s data and continuing with others). Validation examples: schema checks, volume checks, range checks.
-- **Error Handling & Notifications:** On runtime errors (API failures, DB errors), the pipeline shall catch exceptions, log detailed error information, and notify the support team. The system should support reruns of the pipeline (or parts of it) after issues are resolved.
+- **Error Handling & Notifications:** On runtime errors (API failures, DB errors), the pipeline shall catch exceptions, log detailed error information, and notify the support team. *Status: logging and `pipeline_run` metadata are implemented; notification sender is not wired.* The system should support reruns of the pipeline (or parts of it) after issues are resolved.
 - **Logging and Audit Trail:** Every run shall produce logs capturing start/end time, records fetched per source, errors/warnings, and confirmation of data stored. Optionally a **run history table** records each pipeline run status and timestamp.
 - **Configuration Management:** The pipeline shall use external configuration for non-code settings such as active sources, API endpoints, credentials references, and tunable parameters (timeouts, batch sizes). Adding a source should mostly be config + provider module, not core code changes.
 - **Data Access & Dashboard:** Provide a **Streamlit dashboard** that allows authorized users to view and interact with the latest data. It should support basic filtering/querying and downloads (CSV).
-- **Role-Based Access Control:** Enforce access control so only authenticated users can access. Different actions restricted by role (admins vs analysts).
+- **Role-Based Access Control:** Enforce access control so only authenticated users can access. Different actions restricted by role (admins vs analysts). *Status: login gate exists; role helper is unused by pages; auth fails open to development defaults when `ATLAS_DASHBOARD_USERS` is unset.*
 - **Modularity for New Data Sources:** Adding a new provider should require implementing a new adapter and minimal config changes; the orchestrator should dynamically include new providers that follow the interface.
 - **Scalability for Data Volume:** The design must handle growth in sources and volume; leverage parallelism and batch processing as needed.
 - **Security Considerations:** No hard-coded secrets. Secrets stored in vault/secure settings. Encrypt data in transit and at rest. Use least privilege for identities.
@@ -66,7 +90,7 @@ The focus is on creating a **scalable, secure, and modular pipeline** that suppo
 **Flow:** External Data Sources → Ingestion (Providers) → (Optional) Raw/Staging Storage → Transform & Validate → Central DB → Streamlit Dashboard
 
 ### Modularity and Data Source Abstraction
-- Providers implement a common interface (e.g., `fetch_data(date)` returning standardized structures).
+- Providers implement a common interface (`fetch_data(target_date, instruments=None)` returning standardized structures).
 - Orchestrator reads configuration to determine which providers run.
 - Providers encapsulate authentication, pagination, parsing, and source-specific quirks.
 - Orchestrator catches per-provider failures; supports parallelism (threads/async or multi-function fanout).
@@ -78,7 +102,7 @@ The focus is on creating a **scalable, secure, and modular pipeline** that suppo
 - Differentiate backfill runs in logs and run metadata.
 
 ### System Components
-- **Orchestration:** Azure Functions Timer Trigger (or equivalent).
+- **Target orchestration:** Azure Functions Timer Trigger (or equivalent). Current checked-in execution is CLI-driven.
 - **Optional Raw Archive:** Azure Blob / object storage for raw payloads and staging.
 - **Target Storage:** Azure SQL MI (or equivalent relational DB).
 - **UI:** Streamlit app querying the DB.
@@ -96,10 +120,12 @@ The schema should support:
 **Recommended logical tables:**
 - `dim_source` — provider metadata
 - `dim_instrument` (optional for asset universe) — ticker, exchange, asset_type, status
-- `fact_prices` / `fact_ohlcv` — daily OHLCV (raw + adjusted) keyed by instrument + date
-- `fact_macro_series` — FRED/BLS series keyed by series_id + date
-- `fact_features` — engineered features keyed by instrument + date + feature_name
-- `pipeline_runs` — run-level logs and metrics (status, duration, rows inserted/updated, error text)
+- `fact_ohlcv` — daily OHLCV (raw + adjusted) keyed by instrument + date
+- `fact_macro` — FRED observations keyed by series_id + observation date
+- `fact_feature` — engineered features keyed by instrument + date + feature_name; table exists, but the pipeline does not populate it yet
+- `feature_diagnostic` — feature quality metrics (IC/hit rate); schema exists, diagnostics persistence is currently deferred
+- `pipeline_run` — run-level logs and metrics (status, duration, rows inserted/updated, error text)
+- `instrument_tag` — instrument tagging for portfolio/subset runs
 
 **Indexing guidelines:**
 - Composite keys on (instrument_id, trade_date) for price tables.
@@ -122,9 +148,10 @@ The schema should support:
 | **Guest** (optional) | Limited demo access (future). |
 
 ### Authentication
-- Minimum viable: **simple username/password** (basic auth) for dashboard.
+- Minimum viable: **simple username/password** for dashboard via `ATLAS_DASHBOARD_USERS` (username → SHA-256 hash JSON).
+- Current defaults when unset: `admin` / `analyst` with password `atlas123` (development convenience; not fail-closed).
 - Preferred: Azure AD / SSO for enterprise-grade auth and group-based RBAC.
-- Secrets stored in vault (Key Vault or equivalent).
+- Secrets stored in vault (Key Vault or equivalent) for Azure deployments.
 - DB permissions separated for read vs write.
 
 ---
